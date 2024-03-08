@@ -6,12 +6,11 @@ use mio::net::TcpListener;
 use mio::{Events, Interest, Poll, Token};
 
 fn main() {
-    const PORT: u16 = 6379;
     const PONG: &str = "+PONG\r\n";
     const PONG_TOKEN: Token = Token(0);
     let mut poll = Poll::new().unwrap();
     let mut events = Events::with_capacity(128);
-    let mut listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 0], PORT))).unwrap();
+    let mut listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 0], 6379))).unwrap();
     poll.registry()
         .register(&mut listener, PONG_TOKEN, Interest::READABLE)
         .unwrap();
