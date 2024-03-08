@@ -10,7 +10,7 @@ fn main() {
     const PONG_TOKEN: Token = Token(0);
     let mut poll = Poll::new().unwrap();
     let mut events = Events::with_capacity(128);
-    let mut listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 0], 6379))).unwrap();
+    let mut listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 6379))).unwrap();
     poll.registry()
         .register(&mut listener, PONG_TOKEN, Interest::READABLE)
         .unwrap();
