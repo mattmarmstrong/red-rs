@@ -1,11 +1,14 @@
 use std::io::{Read, Write};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use tokio::io;
 
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 
 fn main() {
+    static PING_COUNT: AtomicUsize = AtomicUsize::new(0);
     const TOKEN: Token = Token(0);
     let mut poll = Poll::new().unwrap();
     let mut events = Events::with_capacity(128);
@@ -13,17 +16,22 @@ fn main() {
     poll.registry()
         .register(&mut listener, TOKEN, Interest::READABLE)
         .unwrap();
-    loop {
+    'outer: loop {
         poll.poll(&mut events, Some(Duration::from_millis(1000)))
             .unwrap();
         for event in events.iter() {
             match event.token() {
-                TOKEN => loop {
+                TOKEN => 'inner: loop {
                     match listener.accept() {
                         Ok((mut stream, connection)) => {
                             println!("Accepted connection from: {}", connection);
                             handle_connection(&mut stream).unwrap();
+                            PING_COUNT.fetch_add(1, Ordering::SeqCst);
+                            if PING_COUNT.load(Ordering::SeqCst) == 2 {
+                                break 'outer;
+                            }
                         }
+                        Err(ref err) if would_block(err) => break 'outer,
                         Err(e) => eprintln!("{}", e),
                     }
                 },
@@ -43,4 +51,8 @@ fn handle_connection(mut stream: &TcpStream) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn would_block(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::WouldBlock
 }
