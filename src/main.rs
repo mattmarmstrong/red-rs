@@ -46,7 +46,8 @@ fn handle_connection(mut stream: &TcpStream) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];
     while let Ok(val) = stream.read(&mut buffer) {
         if val != 0 {
-            stream.write(PONG.as_bytes()).unwrap();
+            stream.write_all(PONG.as_bytes()).unwrap();
+            stream.flush()?
         }
     }
 
