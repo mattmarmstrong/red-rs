@@ -14,7 +14,7 @@ fn main() {
         .register(&mut listener, TOKEN, Interest::READABLE)
         .unwrap();
     loop {
-        poll.poll(&mut events, Some(Duration::from_millis(100)))
+        poll.poll(&mut events, Some(Duration::from_millis(1000)))
             .unwrap();
         for event in events.iter() {
             match event.token() {
