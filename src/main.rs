@@ -1,22 +1,28 @@
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::SocketAddr;
 use std::time::Duration;
 
-use mio::{Events, Poll};
+use mio::net::TcpListener;
+use mio::{Events, Interest, Poll, Token};
 
 fn main() {
-    const PONG: &'static str = "+PONG\r\n";
+    const PORT: u16 = 6379;
+    const PONG: &str = "+PONG\r\n";
+    const PONG_TOKEN: Token = Token(0);
     let mut poll = Poll::new().unwrap();
     let mut events = Events::with_capacity(128);
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let mut listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 0], PORT))).unwrap();
+    poll.registry()
+        .register(&mut listener, PONG_TOKEN, Interest::READABLE)
+        .unwrap();
     loop {
         poll.poll(&mut events, Some(Duration::from_millis(100)))
             .unwrap();
         for event in events.iter() {
-            loop {
-                for stream in listener.incoming() {
-                    match stream {
-                        Ok(mut stream) => {
+            match event.token() {
+                PONG_TOKEN => loop {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
                             let mut buffer = [0; 1024];
                             while let Ok(val) = stream.read(&mut buffer) {
                                 if val != 0 {
@@ -26,7 +32,8 @@ fn main() {
                         }
                         Err(e) => eprintln!("{}", e),
                     }
-                }
+                },
+                _ => panic!(),
             }
         }
     }
