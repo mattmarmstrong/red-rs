@@ -27,7 +27,7 @@ fn main() {
                             println!("Accepted connection from: {}", connection);
                             handle_connection(&mut stream).unwrap();
                             PING_COUNT.fetch_add(1, Ordering::SeqCst);
-                            if PING_COUNT.load(Ordering::SeqCst) == 2 {
+                            if PING_COUNT.load(Ordering::SeqCst) == 3 {
                                 break 'outer;
                             }
                         }
