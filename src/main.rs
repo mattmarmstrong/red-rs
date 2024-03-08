@@ -8,7 +8,6 @@ use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Token};
 
 fn main() {
-    static PING_COUNT: AtomicUsize = AtomicUsize::new(0);
     const TOKEN: Token = Token(0);
     let mut poll = Poll::new().unwrap();
     let mut events = Events::with_capacity(128);
@@ -26,10 +25,6 @@ fn main() {
                         Ok((mut stream, connection)) => {
                             println!("Accepted connection from: {}", connection);
                             handle_connection(&mut stream).unwrap();
-                            PING_COUNT.fetch_add(1, Ordering::SeqCst);
-                            if PING_COUNT.load(Ordering::SeqCst) == 3 {
-                                break 'outer;
-                            }
                         }
                         Err(ref err) if would_block(err) => break 'outer,
                         Err(e) => eprintln!("{}", e),
