@@ -4,6 +4,7 @@ use std::net::{TcpListener, TcpStream};
 fn handle_ping(mut stream: TcpStream) -> anyhow::Result<()> {
     const PONG: &'static str = "+PONG\r\n";
     stream.write(PONG.as_bytes())?;
+    stream.write(PONG.as_bytes())?;
     Ok(())
 }
 
