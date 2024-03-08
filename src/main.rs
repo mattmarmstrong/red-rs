@@ -1,54 +1,46 @@
-use std::io::{Read, Write};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
-use tokio::io;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
-use mio::net::{TcpListener, TcpStream};
-use mio::{Events, Interest, Poll, Token};
+#[tokio::main]
+async fn main() {
+    const PORT: u16 = 6379;
+    let socket = SocketAddr::from(([127, 0, 0, 1], PORT));
+    let listener = TcpListener::bind(socket)
+        .await
+        .expect("Failed to bind to socket!");
 
-fn main() {
-    const TOKEN: Token = Token(0);
-    let mut poll = Poll::new().unwrap();
-    let mut events = Events::with_capacity(128);
-    let mut listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 6379))).unwrap();
-    poll.registry()
-        .register(&mut listener, TOKEN, Interest::READABLE)
-        .unwrap();
-    'outer: loop {
-        poll.poll(&mut events, Some(Duration::from_millis(1000)))
-            .unwrap();
-        for event in events.iter() {
-            match event.token() {
-                TOKEN => 'inner: loop {
-                    match listener.accept() {
-                        Ok((mut stream, connection)) => {
-                            println!("Accepted connection from: {}", connection);
-                            handle_connection(&mut stream).unwrap();
-                        }
-                        Err(ref err) if would_block(err) => break 'outer,
-                        Err(e) => eprintln!("{}", e),
-                    }
-                },
-                _ => panic!(),
+    'event: loop {
+        match listener.accept().await {
+            Ok((stream, client_connection)) => {
+                println!("Received connection from client: {}", client_connection);
+                tokio::spawn(async move {
+                    handle_connection(stream).await.unwrap();
+                });
+            }
+            Err(e) => {
+                eprintln!("Error accepting client connection: {}", e);
             }
         }
     }
 }
 
-fn handle_connection(mut stream: &TcpStream) -> anyhow::Result<()> {
-    const PONG: &str = "+PONG\r\n";
+async fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
+    const PONG: &[u8] = b"+PONG\r\n";
     let mut buffer = [0; 1024];
-    while let Ok(val) = stream.read(&mut buffer) {
-        if val != 0 {
-            stream.write_all(PONG.as_bytes()).unwrap();
-            stream.flush()?
+    loop {
+        let bytes_read = stream
+            .read(&mut buffer)
+            .await
+            .expect("Failed to read from client stream!");
+        if bytes_read == 0 {
+            break;
         }
+
+        stream
+            .write_all(PONG)
+            .await
+            .expect("Failed to write to client stream!");
     }
-
     Ok(())
-}
-
-fn would_block(err: &io::Error) -> bool {
-    err.kind() == io::ErrorKind::WouldBlock
 }
