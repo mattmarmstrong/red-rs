@@ -1,3 +1,5 @@
+use redis_starter_rust::resp::command::Command;
+use redis_starter_rust::resp::parse::Parser;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -26,7 +28,6 @@ async fn main() {
 }
 
 async fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
-    const PONG: &[u8] = b"+PONG\r\n";
     let mut buffer = [0; 1024];
     loop {
         let bytes_read = stream
@@ -37,10 +38,13 @@ async fn handle_connection(mut stream: TcpStream) -> anyhow::Result<()> {
             break;
         }
 
-        stream
-            .write_all(PONG)
-            .await
-            .expect("Failed to write to client stream!");
+        let mut parser = Parser::new(&buffer);
+        let data = parser.parse()?;
+        if let Some(cmd) = Command::from_dt(&data) {
+            if let Some(resp) = cmd.response() {
+                stream.write_all(resp).await?;
+            }
+        }
     }
     Ok(())
 }
