@@ -1,6 +1,6 @@
 use super::errors::RESPError;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum DataType {
     SimpleString(String),
     SimpleError(String),

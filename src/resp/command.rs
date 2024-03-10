@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 use super::data::DataType;
 
 lazy_static! {
+    // TODO: return to this
     pub static ref COMMANDS: HashSet<String> = {
         let mut commands = HashSet::new();
         commands.insert("echo".to_string());

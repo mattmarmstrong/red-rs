@@ -10,11 +10,16 @@ type R<T> = Result<T, RESPError>;
 pub struct Parser<'data> {
     data: &'data [u8],
     position: usize,
+    len: usize,
 }
 
 impl<'data> Parser<'data> {
     pub fn new(data: &'data [u8]) -> Self {
-        Self { data, position: 0 }
+        Self {
+            data,
+            position: 0,
+            len: data.len(),
+        }
     }
 
     fn read_byte(&mut self) -> u8 {
@@ -27,24 +32,33 @@ impl<'data> Parser<'data> {
         self.data[self.position + 1]
     }
 
+    fn at_end(&self) -> bool {
+        self.position == self.len - 1
+    }
+
     // end-of-sequence
     fn is_eos(&self) -> bool {
         self.data[self.position] == b'\r' && self.peek() == b'\n'
     }
 
     fn skip_crlf(&mut self) -> Result<(), RESPError> {
-        if self.is_eos() {
-            self.read_byte();
-            self.read_byte();
-            return Ok(());
-        } else {
-            return Err(RESPError::InvalidData);
+        match !self.at_end() {
+            true => {
+                if self.is_eos() {
+                    self.read_byte();
+                    self.read_byte();
+                    return Ok(());
+                } else {
+                    return Err(RESPError::InvalidData);
+                }
+            }
+            false => Err(RESPError::InvalidData),
         }
     }
 
     fn parse_len(&mut self) -> Result<isize, RESPError> {
         let mut buffer = String::new();
-        while !self.is_eos() {
+        while !self.is_eos() && !self.at_end() {
             buffer.push(self.read_byte() as char);
         }
         match buffer.parse::<isize>() {
@@ -54,22 +68,32 @@ impl<'data> Parser<'data> {
     }
 
     fn parse_simple_str(&mut self) -> R<DataType> {
+        self.read_byte(); // skip the type byte
         let mut buffer = String::new();
         while !self.is_eos() {
-            buffer.push(self.read_byte().to_ascii_lowercase() as char)
+            if !self.at_end() {
+                buffer.push(self.read_byte().to_ascii_lowercase() as char)
+            } else {
+                return Err(RESPError::InvalidData);
+            }
         }
         self.skip_crlf()?;
         Ok(DataType::SimpleString(buffer))
     }
 
     fn parse_bulk_str(&mut self) -> R<DataType> {
+        self.read_byte(); // skip the type byte
         let len = self.parse_len()?;
         match len > 0 {
             true => {
                 self.skip_crlf()?;
                 let mut buffer = String::with_capacity(len as usize);
                 for _ in 0..len {
-                    buffer.push(self.read_byte().to_ascii_lowercase() as char);
+                    if !self.at_end() {
+                        buffer.push(self.read_byte().to_ascii_lowercase() as char);
+                    } else {
+                        return Err(RESPError::InvalidData);
+                    }
                 }
                 self.skip_crlf()?;
                 Ok(DataType::BulkString(buffer))
@@ -79,6 +103,7 @@ impl<'data> Parser<'data> {
     }
 
     fn parse_array(&mut self) -> R<DataType> {
+        self.read_byte(); // skip the type byte
         let len = self.parse_len()?;
         match len > 0 {
             true => {
@@ -87,7 +112,6 @@ impl<'data> Parser<'data> {
                 for _ in 0..len {
                     buffer.push(self.parse()?);
                 }
-                self.skip_crlf()?;
                 Ok(DataType::Array(buffer))
             }
             false => Ok(DataType::Array(Vec::new())),
@@ -101,5 +125,91 @@ impl<'data> Parser<'data> {
             b'*' => self.parse_array()?,
             _ => return Err(RESPError::InvalidType),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::DataType;
+    use super::Parser;
+
+    #[test]
+    fn test_skip_crlf() {
+        let data = b"\r\ntest\r\n";
+        let mut parser = Parser::new(data);
+        match parser.skip_crlf() {
+            Ok(_) => assert_eq!(parser.read_byte(), b't'),
+            Err(_) => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_parse_simple_str() {
+        let data = b"+TEST\r\n";
+        let mut parser = Parser::new(data);
+        let expected = DataType::SimpleString("test".to_string());
+        let actual = parser.parse().unwrap();
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_parse_bulk_str() {
+        let data = b"$4\r\nTEST\r\n";
+        let mut parser = Parser::new(data);
+        let expected = DataType::BulkString("test".to_string());
+        let actual = parser.parse().unwrap();
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_parse_array() {
+        let data = b"*2\r\n$4\r\ntest\r\n+TEST\r\n";
+        let mut parser = Parser::new(data);
+        let expected_vec = vec![
+            DataType::BulkString("test".to_string()),
+            DataType::SimpleString("test".to_string()),
+        ];
+        let expected = DataType::Array(expected_vec);
+        let actual = parser.parse().unwrap();
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_parse_nested_array() {
+        let data = b"*2\r\n*2\r\n+OK\r\n+TEST\r\n$4\r\nTEST\r\n";
+        let mut parser = Parser::new(data);
+        let nested_vec = vec![
+            DataType::SimpleString("ok".to_string()),
+            DataType::SimpleString("test".to_string()),
+        ];
+        let nested_arr = DataType::Array(nested_vec);
+        let outer_vec = vec![nested_arr, DataType::BulkString("test".to_string())];
+        let expected = DataType::Array(outer_vec);
+        let actual = parser.parse_array().unwrap();
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_parse_empty() {
+        let data = b"$0\r\n\r\n";
+        let mut parser = Parser::new(data);
+        let expected = DataType::BulkString("".to_string());
+        let actual = parser.parse().unwrap();
+        assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn test_invalid_parse_returns_err() {
+        let data = b"INVALID";
+        let mut parser = Parser::new(data);
+        assert!(parser.parse().is_err());
+    }
+
+    #[test]
+    fn test_parse_no_crlf_returns_err() {
+        let data = b"*2\r\n+TEST";
+        let mut parser = Parser::new(data);
+        assert!(parser.parse().is_err());
     }
 }
