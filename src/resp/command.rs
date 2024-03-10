@@ -5,7 +5,7 @@ use lazy_static::lazy_static;
 use super::data::DataType;
 
 lazy_static! {
-    // TODO: return to this
+    // TODO: return to this. Hashtable is going to be a better fit
     pub static ref COMMANDS: HashSet<String> = {
         let mut commands = HashSet::new();
         commands.insert("echo".to_string());
@@ -47,13 +47,6 @@ impl Command {
                 None
             }
             _ => unimplemented!(),
-        }
-    }
-
-    pub fn response(&self) -> Option<&[u8]> {
-        match self {
-            Command::PING => Some(b"+PONG\r\n"),
-            Command::Echo(s) => Some(s.as_bytes()),
         }
     }
 }
