@@ -71,7 +71,6 @@ impl<'data> Parser<'data> {
     fn parse_len(&mut self) -> anyhow::Result<isize, RESPError> {
         let mut buffer = String::new();
         while !self.is_eos() && !self.at_end() {
-            println!("{}", self.curr_byte());
             buffer.push(self.read_byte() as char);
         }
         match buffer.parse::<isize>() {

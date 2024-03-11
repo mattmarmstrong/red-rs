@@ -119,6 +119,7 @@ impl Command {
                 }
             },
             Self::Set(key, val) => {
+                println!("Writing to store! Key: {}, Value: {}", &key, &val);
                 store
                     .write()
                     .unwrap()
