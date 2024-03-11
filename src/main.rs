@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
 
+use redis_starter_rust::server::store::Store;
 use tokio::net::TcpListener;
 
 use redis_starter_rust::server::handle_connection;
@@ -13,7 +12,7 @@ async fn main() {
     let listener = TcpListener::bind(socket)
         .await
         .expect("Failed to bind to socket!");
-    let store = Arc::new(RwLock::new(HashMap::new()));
+    let store = Store::new();
     loop {
         match listener.accept().await {
             Ok((mut stream, client_connection)) => {

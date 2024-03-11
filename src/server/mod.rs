@@ -1,8 +1,6 @@
 pub mod command;
 pub mod errors;
-
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+pub mod store;
 
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -10,8 +8,7 @@ use tokio::net::TcpStream;
 use crate::resp::parse::Parser;
 
 use command::Command;
-
-type Store = Arc<RwLock<HashMap<String, String>>>;
+use store::Store;
 
 pub async fn handle_connection(mut stream: &mut TcpStream, mut store: Store) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];

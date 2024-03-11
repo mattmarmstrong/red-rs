@@ -1,13 +1,15 @@
+use std::collections::VecDeque;
+use std::time::Duration;
+
+use hashbrown::HashMap;
 use lazy_static::lazy_static;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
-
-use std::collections::{HashMap, VecDeque};
 
 use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
 
 use super::errors::CommandError;
-use super::Store;
+use super::store::Store;
 
 // Eventually, this should have a function for every individual command.
 // Then we can dispatch actions accordingly
@@ -28,34 +30,97 @@ lazy_static! {
 type Vec<T> = VecDeque<T>;
 type R<T> = anyhow::Result<T, CommandError>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     PING,
     Echo(String),
     Get(String),
-    Set(String, String),
+    Set(String, String, Option<Duration>),
 }
 
 impl Command {
-    // This function assumes that the args slice passed in is of the correct length
+    fn ping() -> Result<Self, CommandError> {
+        Ok(Self::PING)
+    }
+
+    fn echo(mut args: Vec<String>) -> R<Self> {
+        // errors should be handled well before this point
+        // leaving this here for now, will remove later
+        match args.pop_front() {
+            Some(arg) => Ok(Self::Echo(arg)),
+            None => Err(CommandError::InvalidArgs),
+        }
+    }
+
+    fn get(mut args: Vec<String>) -> R<Self> {
+        match args.pop_front() {
+            Some(arg) => Ok(Self::Get(arg)),
+            None => Err(CommandError::InvalidArgs),
+        }
+    }
+
+    fn set(mut args: Vec<String>) -> R<Self> {
+        let key = args.pop_front();
+        let val = args.pop_front();
+        let exp = args.pop_front();
+        match (key, val) {
+            (Some(k), Some(v)) => match exp {
+                Some(dur) => match dur.parse::<u64>() {
+                    Ok(ms) => {
+                        let expiry = Some(Duration::from_millis(ms));
+                        Ok(Self::Set(k, v, expiry))
+                    }
+                    Err(_) => Err(CommandError::InvalidArgs),
+                },
+                None => Ok(Self::Set(k, v, None)),
+            },
+            _ => Err(CommandError::InvalidArgs),
+        }
+    }
+
+    #[inline]
+    fn do_ping() -> String {
+        "+PONG\r\n".to_string()
+    }
+
+    #[inline]
+    fn do_echo(arg: &String) -> String {
+        arg.to_owned()
+    }
+
+    fn do_get(key: &String, store: &Store) -> String {
+        match store.try_read(key.to_owned()) {
+            Ok(val) => match val {
+                Some(v) => v,
+                None => "$-1\r\n".to_string(),
+            },
+            // TODO: handle read errors more gracefully
+            Err(_) => "$-1\r\n".to_string(),
+        }
+    }
+
+    fn do_set(key: &String, val: &String, exp: &Option<Duration>, store: &mut Store) -> String {
+        match store.try_write(key.to_owned(), val.to_owned(), exp.to_owned()) {
+            Ok(_) => "+OK\r\n".to_string(),
+            // TODO: error handling
+            Err(_) => "$-1\r\n".to_string(),
+        }
+    }
+
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
         match str {
-            "ping" => Ok(Self::PING),
-            "echo" => {
-                let arg = args.unwrap().pop_front().unwrap();
-                Ok(Self::Echo(arg))
+            // No args commands
+            "ping" => Command::ping(),
+            _ => {
+                // args commands
+                let args = args.unwrap();
+                match str {
+                    "echo" => Command::echo(args),
+                    "get" => Command::get(args),
+                    "set" => Command::set(args),
+                    _ => Err(CommandError::NotFound),
+                }
             }
-            "get" => {
-                let key = args.unwrap().pop_front().unwrap();
-                Ok(Self::Get(key))
-            }
-            "set" => {
-                let mut args = args.unwrap();
-                let key = args.pop_front().unwrap();
-                let val = args.pop_front().unwrap();
-                Ok(Self::Set(key.to_owned(), val.to_owned()))
-            }
-            _ => Err(CommandError::NotFound),
         }
     }
 
@@ -108,25 +173,16 @@ impl Command {
         let resp: String;
         match self {
             Self::PING => {
-                resp = "+PONG\r\n".to_string();
+                resp = Command::do_ping();
             }
             Self::Echo(s) => {
-                resp = Serializer::to_simple_str(&s);
+                resp = Serializer::to_simple_str(&Command::do_echo(s));
             }
-            Self::Get(key) => match store.read().unwrap().get(key) {
-                Some(val) => {
-                    resp = Serializer::to_bulk_str(&val);
-                }
-                None => {
-                    resp = "$-1\r\n".to_string();
-                }
-            },
-            Self::Set(key, val) => {
-                store
-                    .write()
-                    .unwrap()
-                    .insert(key.to_owned(), val.to_owned());
-                resp = "+OK\r\n".to_string();
+            Self::Get(key) => {
+                resp = Serializer::to_bulk_str(&Command::do_get(key, store));
+            }
+            Self::Set(k, v, exp) => {
+                resp = Command::do_set(k, v, exp, store);
             }
         }
         stream.write_all(resp.as_bytes()).await?;
