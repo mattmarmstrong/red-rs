@@ -144,17 +144,11 @@ impl Command {
         // COMMANDS currently stores only the number of required args.
         // This should change.
         match COMMANDS.get(&first) {
-            Some(&n) => {
-                let actual = arr.len() - 1;
-                match actual == n {
-                    true => {
-                        if n > 0 {
-                            return Ok(Self::try_new(&first, Some(str_arr))?);
-                        } else {
-                            return Ok(Self::try_new(&first, None)?);
-                        }
-                    }
-                    false => Err(CommandError::InvalidArgs),
+            Some(_) => {
+                if str_arr.len() > 0 {
+                    return Ok(Self::try_new(&first, Some(str_arr))?);
+                } else {
+                    return Ok(Self::try_new(&first, None)?);
                 }
             }
             None => Err(CommandError::NotFound),
