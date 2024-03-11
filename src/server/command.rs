@@ -138,7 +138,11 @@ impl Command {
         // Currently assumes that the array args are all string types.
         let mut str_arr = arr
             .iter()
-            .map(|data| data.try_to_string().unwrap())
+            .map(|data| {
+                let s = data.try_to_string().unwrap();
+                println!("Array arg: {}", s);
+                s
+            })
             .collect::<Vec<String>>();
         let first = str_arr.pop_front().unwrap();
         // COMMANDS currently stores only the number of required args.
