@@ -1,10 +1,13 @@
+use std::collections::VecDeque;
+
 use super::data::DataType;
 use super::errors::RESPError;
 
 // RESP sequence terminal characters. -> https://redis.io/docs/reference/protocol-spec/
 pub const _CRLF: &[u8] = b"\r\n";
 
-type R<T> = Result<T, RESPError>;
+type Vec<T> = VecDeque<T>;
+type R<T> = anyhow::Result<T, RESPError>;
 
 #[derive(Debug)]
 pub struct Parser<'data> {
@@ -22,26 +25,35 @@ impl<'data> Parser<'data> {
         }
     }
 
+    #[inline]
+    fn curr_byte(&mut self) -> u8 {
+        self.data[self.position]
+    }
+
+    #[inline]
+    fn peek(&self) -> u8 {
+        self.data[self.position + 1]
+    }
+
+    #[inline]
     fn read_byte(&mut self) -> u8 {
         let byte = self.data[self.position];
         self.position += 1;
         byte
     }
 
-    fn peek(&self) -> u8 {
-        self.data[self.position + 1]
-    }
-
+    #[inline]
     fn at_end(&self) -> bool {
         self.position == self.len - 1
     }
 
     // end-of-sequence
+    #[inline]
     fn is_eos(&self) -> bool {
         self.data[self.position] == b'\r' && self.peek() == b'\n'
     }
 
-    fn skip_crlf(&mut self) -> Result<(), RESPError> {
+    fn skip_crlf(&mut self) -> anyhow::Result<(), RESPError> {
         match !self.at_end() {
             true => {
                 if self.is_eos() {
@@ -56,9 +68,10 @@ impl<'data> Parser<'data> {
         }
     }
 
-    fn parse_len(&mut self) -> Result<isize, RESPError> {
+    fn parse_len(&mut self) -> anyhow::Result<isize, RESPError> {
         let mut buffer = String::new();
         while !self.is_eos() && !self.at_end() {
+            println!("{}", self.curr_byte());
             buffer.push(self.read_byte() as char);
         }
         match buffer.parse::<isize>() {
@@ -110,7 +123,7 @@ impl<'data> Parser<'data> {
                 self.skip_crlf()?;
                 let mut buffer = Vec::with_capacity(len as usize);
                 for _ in 0..len {
-                    buffer.push(self.parse()?);
+                    buffer.push_back(self.parse()?);
                 }
                 Ok(DataType::Array(buffer))
             }
@@ -131,6 +144,8 @@ impl<'data> Parser<'data> {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::VecDeque;
+
     use super::DataType;
     use super::Parser;
 
@@ -142,6 +157,17 @@ mod tests {
             Ok(_) => assert_eq!(parser.read_byte(), b't'),
             Err(_) => panic!(),
         }
+    }
+
+    #[test]
+    fn test_parse_len() {
+        let data = b"$1234\r\n";
+        let mut parser = Parser::new(data);
+        let expected = 1234;
+        // skiping the type byte, which is what the type parsing functions do already.
+        parser.read_byte();
+        let actual = parser.parse_len().unwrap();
+        assert_eq!(expected, actual)
     }
 
     #[test]
@@ -166,10 +192,9 @@ mod tests {
     fn test_parse_array() {
         let data = b"*2\r\n$4\r\ntest\r\n+TEST\r\n";
         let mut parser = Parser::new(data);
-        let expected_vec = vec![
-            DataType::BulkString("test".to_string()),
-            DataType::SimpleString("test".to_string()),
-        ];
+        let mut expected_vec = VecDeque::new();
+        expected_vec.push_back(DataType::BulkString("test".to_string()));
+        expected_vec.push_back(DataType::SimpleString("test".to_string()));
         let expected = DataType::Array(expected_vec);
         let actual = parser.parse().unwrap();
         assert_eq!(expected, actual)
@@ -179,12 +204,13 @@ mod tests {
     fn test_parse_nested_array() {
         let data = b"*2\r\n*2\r\n+OK\r\n+TEST\r\n$4\r\nTEST\r\n";
         let mut parser = Parser::new(data);
-        let nested_vec = vec![
-            DataType::SimpleString("ok".to_string()),
-            DataType::SimpleString("test".to_string()),
-        ];
+        let mut nested_vec = VecDeque::new();
+        nested_vec.push_back(DataType::SimpleString("ok".to_string()));
+        nested_vec.push_back(DataType::SimpleString("test".to_string()));
         let nested_arr = DataType::Array(nested_vec);
-        let outer_vec = vec![nested_arr, DataType::BulkString("test".to_string())];
+        let mut outer_vec = VecDeque::new();
+        outer_vec.push_back(nested_arr);
+        outer_vec.push_back(DataType::BulkString("test".to_string()));
         let expected = DataType::Array(outer_vec);
         let actual = parser.parse_array().unwrap();
         assert_eq!(expected, actual)
@@ -211,5 +237,12 @@ mod tests {
         let data = b"*2\r\n+TEST";
         let mut parser = Parser::new(data);
         assert!(parser.parse().is_err());
+    }
+
+    #[test]
+    fn test_invalid_len_returns_err() {
+        let data = b"$1A5\rtest\n";
+        let mut parser = Parser::new(data);
+        assert!(parser.parse_len().is_err())
     }
 }

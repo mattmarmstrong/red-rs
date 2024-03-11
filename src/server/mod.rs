@@ -1,0 +1,34 @@
+pub mod command;
+pub mod errors;
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
+use tokio::io::AsyncReadExt;
+use tokio::net::TcpStream;
+
+use crate::resp::parse::Parser;
+
+use command::Command;
+
+type Store = Arc<RwLock<HashMap<String, String>>>;
+
+pub async fn handle_connection(mut stream: &mut TcpStream, mut store: Store) -> anyhow::Result<()> {
+    let mut buffer = [0; 1024];
+    loop {
+        let bytes_read = stream
+            .read(&mut buffer)
+            .await
+            .expect("Failed to read from client stream!");
+        if bytes_read == 0 {
+            break;
+        }
+
+        let mut parser = Parser::new(&buffer);
+        let data = parser.parse()?;
+        if let Some(cmd) = Command::new(data) {
+            cmd.execute(&mut stream, &mut store).await?;
+        }
+    }
+    Ok(())
+}

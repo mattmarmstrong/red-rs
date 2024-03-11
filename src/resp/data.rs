@@ -1,6 +1,10 @@
+use std::collections::VecDeque;
+
 use super::errors::RESPError;
 
-#[derive(Debug, PartialEq, Eq)]
+type Vec<T> = VecDeque<T>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DataType {
     SimpleString(String),
     SimpleError(String),
@@ -22,12 +26,10 @@ impl DataType {
         a == cmp
     }
 
-    pub fn try_to_string(&self) -> Result<String, RESPError> {
+    pub fn try_to_string(&self) -> anyhow::Result<String, RESPError> {
         match self {
             DataType::SimpleString(s) => Ok(s.to_string()),
-            DataType::SimpleError(s) => Ok(s.to_string()),
             DataType::BulkString(s) => Ok(s.to_string()),
-            DataType::BulkError(s) => Ok(s.to_string()),
             _ => Err(RESPError::InvalidType),
         }
     }
