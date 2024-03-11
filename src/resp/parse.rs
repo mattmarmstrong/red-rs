@@ -26,11 +26,6 @@ impl<'data> Parser<'data> {
     }
 
     #[inline]
-    fn curr_byte(&mut self) -> u8 {
-        self.data[self.position]
-    }
-
-    #[inline]
     fn peek(&self) -> u8 {
         self.data[self.position + 1]
     }
