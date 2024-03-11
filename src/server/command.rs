@@ -9,6 +9,9 @@ use crate::resp::serialize::Serializer;
 use super::errors::CommandError;
 use super::Store;
 
+// Eventually, this should have a function for every individual command.
+// Then we can dispatch actions accordingly
+
 lazy_static! {
     // key: command name
     // value: number of args
@@ -48,8 +51,8 @@ impl Command {
             }
             "set" => {
                 let mut args = args.unwrap();
-                let key = args.pop_back().unwrap();
-                let val = args.pop_back().unwrap();
+                let key = args.pop_front().unwrap();
+                let val = args.pop_front().unwrap();
                 Ok(Self::Set(key.to_owned(), val.to_owned()))
             }
             _ => Err(CommandError::NotFound),
@@ -119,7 +122,6 @@ impl Command {
                 }
             },
             Self::Set(key, val) => {
-                println!("Writing to store! Key: {}, Value: {}", &key, &val);
                 store
                     .write()
                     .unwrap()
