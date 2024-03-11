@@ -48,8 +48,8 @@ impl Command {
             }
             "set" => {
                 let mut args = args.unwrap();
-                let key = args.pop_front().unwrap();
-                let val = args.pop_front().unwrap();
+                let key = args.pop_back().unwrap();
+                let val = args.pop_back().unwrap();
                 Ok(Self::Set(key.to_owned(), val.to_owned()))
             }
             _ => Err(CommandError::NotFound),
