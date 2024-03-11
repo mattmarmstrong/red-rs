@@ -110,9 +110,14 @@ impl Command {
             Self::Echo(s) => {
                 resp = Serializer::to_simple_str(&s);
             }
-            Self::Get(key) => {
-                resp = Serializer::to_bulk_str(&key);
-            }
+            Self::Get(key) => match store.read().unwrap().get(key) {
+                Some(val) => {
+                    resp = Serializer::to_bulk_str(&val);
+                }
+                None => {
+                    resp = "$-1\r\n".to_string();
+                }
+            },
             Self::Set(key, val) => {
                 store
                     .write()
