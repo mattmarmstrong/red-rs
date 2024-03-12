@@ -10,7 +10,7 @@ use crate::resp::parse::Parser;
 use command::Command;
 use store::Store;
 
-pub async fn handle_connection(mut stream: &mut TcpStream, mut store: Store) -> anyhow::Result<()> {
+pub async fn handle_connection(stream: &mut TcpStream, store: Store) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];
     loop {
         let bytes_read = stream
@@ -24,7 +24,7 @@ pub async fn handle_connection(mut stream: &mut TcpStream, mut store: Store) -> 
         let mut parser = Parser::new(&buffer);
         let data = parser.parse()?;
         if let Some(cmd) = Command::new(data) {
-            cmd.execute(&mut stream, &mut store).await?;
+            cmd.execute(stream, &store).await?;
         }
     }
     Ok(())

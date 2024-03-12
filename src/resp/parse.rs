@@ -54,9 +54,9 @@ impl<'data> Parser<'data> {
                 if self.is_eos() {
                     self.read_byte();
                     self.read_byte();
-                    return Ok(());
+                    Ok(())
                 } else {
-                    return Err(RESPError::InvalidData);
+                    Err(RESPError::InvalidData)
                 }
             }
             false => Err(RESPError::InvalidData),

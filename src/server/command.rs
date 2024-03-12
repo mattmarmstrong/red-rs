@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
@@ -30,6 +31,12 @@ impl Hash for OptionEntry {
     }
 }
 
+impl Borrow<String> for OptionEntry {
+    fn borrow(&self) -> &String {
+        &self.name
+    }
+}
+
 impl OptionEntry {
     fn new(name: String, has_arg: bool) -> Self {
         Self { name, has_arg }
@@ -50,13 +57,13 @@ impl CommandEntry {
     }
 
     #[inline]
-    pub fn has_opts(&self) -> bool {
+    fn has_opts(&self) -> bool {
         self.options.is_some()
     }
 
-    pub fn get_opt_entry(&self, opt: String) -> Option<OptionEntry> {
-        if self.options() {
-            self.options.unwrap().get(&opt)
+    fn get_opt_entry(&self, opt: &String) -> Option<&OptionEntry> {
+        if self.has_opts() {
+            self.options.as_ref().unwrap().get(opt)
         } else {
             None
         }
@@ -76,7 +83,7 @@ lazy_static! {
         let get_entry = CommandEntry::new(1, None);
         commands.insert("get".to_string(), get_entry);
         // Command - set
-        let set_options = HashSet::new();
+        let mut set_options = HashSet::new();
         let px_entry = OptionEntry::new("px".to_string(), true);
         set_options.insert(px_entry);
         let set_entry = CommandEntry::new(2, Some(set_options));
@@ -90,7 +97,8 @@ lazy_static! {
 type Vec<T> = VecDeque<T>;
 type R<T> = anyhow::Result<T, CommandError>;
 
-struct CommandOption {
+#[derive(Debug)]
+pub struct CommandOption {
     name: String,
     val: Option<String>,
 }
@@ -101,7 +109,7 @@ impl CommandOption {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Command {
     PING,
     Echo(String),
@@ -113,7 +121,7 @@ impl Command {
     fn parse_options(name: &str, mut args: Vec<String>) -> R<Vec<CommandOption>> {
         // this is utterly disgusting
         if let Some(entry) = COMMANDS.get(name) {
-            let mut buffer = Vec::new();
+            let mut buffer: Vec<CommandOption> = Vec::new();
             let n = args.len();
             let mut i = 0;
             while i < n {
@@ -121,7 +129,7 @@ impl Command {
                     Some(name) => {
                         // accounting for the arg that was just popped.
                         i += 1;
-                        match entry.get_opt_entry(name) {
+                        match entry.get_opt_entry(&name) {
                             Some(opt_entry) => {
                                 match !buffer.iter().any(|opt| name == opt.name) {
                                     true => {
@@ -144,7 +152,7 @@ impl Command {
                                             }
                                             false => {
                                                 let cmd_opt = CommandOption::new(name, None);
-                                                buffer.push_back(value);
+                                                buffer.push_back(cmd_opt);
                                             }
                                         }
                                     }
@@ -194,7 +202,7 @@ impl Command {
         let val = args.pop_front();
         match (key, val) {
             (Some(k), Some(v)) => {
-                if args.len() > 0 {
+                if !args.is_empty() {
                     let options = Command::parse_options("set", args)?;
                     Ok(Command::Set(k, v, Some(options)))
                 } else {
@@ -229,8 +237,8 @@ impl Command {
     fn do_set(
         key: &String,
         val: &String,
-        options: Option<Vec<CommandOption>>,
-        store: &mut Store,
+        options: &Option<Vec<CommandOption>>,
+        store: &Store,
     ) -> String {
         let exp: Option<Duration>;
         match options {
@@ -239,7 +247,7 @@ impl Command {
                 match opts.iter().find(|opt| &opt.name == "px") {
                     Some(opt) => {
                         // this is handled before this point, unwrapping is safe
-                        match opt.val.unwrap().parse::<usize>() {
+                        match opt.val.to_owned().unwrap().parse::<u64>() {
                             Ok(dur) => {
                                 exp = Some(Duration::from_millis(dur));
                             }
@@ -251,7 +259,7 @@ impl Command {
             }
             None => exp = None,
         }
-        match store.try_write(key.to_owned(), val.to_owned(), exp.to_owned()) {
+        match store.try_write(key.to_owned(), val.to_owned(), exp) {
             Ok(_) => "+OK\r\n".to_string(),
             // TODO: error handling
             Err(_) => "$-1\r\n".to_string(),
@@ -277,7 +285,7 @@ impl Command {
 
     fn from_str(s: String) -> R<Self> {
         match COMMANDS.get(&s) {
-            Some(&n) => match &n {
+            Some(entry) => match entry.args {
                 0 => Ok(Self::try_new(&s, None)?),
                 _ => Err(CommandError::InvalidArgs),
             },
@@ -300,10 +308,10 @@ impl Command {
         // This should change.
         match COMMANDS.contains_key(&first) {
             true => {
-                if str_arr.len() > 0 {
-                    return Ok(Self::try_new(&first, Some(str_arr))?);
+                if !str_arr.is_empty() {
+                    Self::try_new(&first, Some(str_arr))
                 } else {
-                    return Ok(Self::try_new(&first, None)?);
+                    Self::try_new(&first, None)
                 }
             }
             false => Err(CommandError::NotFound),
@@ -318,22 +326,13 @@ impl Command {
         }
     }
 
-    pub async fn execute(&self, stream: &mut TcpStream, store: &mut Store) -> anyhow::Result<()> {
-        let resp: String;
-        match self {
-            Self::PING => {
-                resp = Command::do_ping();
-            }
-            Self::Echo(s) => {
-                resp = Serializer::to_simple_str(&Command::do_echo(s));
-            }
-            Self::Get(key) => {
-                resp = Serializer::to_bulk_str(&Command::do_get(key, store));
-            }
-            Self::Set(k, v, exp) => {
-                resp = Command::do_set(k, v, exp, store);
-            }
-        }
+    pub async fn execute(&self, stream: &mut TcpStream, store: &Store) -> anyhow::Result<()> {
+        let resp = match self {
+            Self::PING => Command::do_ping(),
+            Self::Echo(s) => Serializer::to_simple_str(&Command::do_echo(s)),
+            Self::Get(key) => Serializer::to_bulk_str(&Command::do_get(key, store)),
+            Self::Set(k, v, exp) => Command::do_set(k, v, exp, store),
+        };
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
     }

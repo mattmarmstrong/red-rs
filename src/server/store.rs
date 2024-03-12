@@ -15,13 +15,7 @@ pub struct StoreValue {
 
 impl StoreValue {
     pub fn new(val: String, exp: Option<Duration>) -> Self {
-        let expiry: Option<SystemTime>;
-        match exp {
-            Some(exp) => {
-                expiry = Some(SystemTime::now() + exp);
-            }
-            None => expiry = None,
-        }
+        let expiry: Option<SystemTime> = exp.map(|exp| SystemTime::now() + exp);
         Self { val, expiry }
     }
 
@@ -46,6 +40,12 @@ pub struct Store {
     pub inner: Arc<RwLock<HashMap<String, StoreValue>>>,
 }
 
+impl Default for Store {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Store {
     pub fn new() -> Self {
         let inner = Arc::new(RwLock::new(HashMap::new()));
@@ -68,7 +68,7 @@ impl Store {
         match write_lock {
             Ok(mut store) => {
                 let store_val = StoreValue::new(val, exp);
-                if let Some(_) = store.get(&key) {
+                if store.get(&key).is_some() {
                     store.remove(&key);
                     store.insert(key, store_val);
                 } else {

@@ -1,7 +1,7 @@
 #[derive(Debug)]
 pub struct Serializer {}
 
-impl<'data> Serializer {
+impl Serializer {
     pub fn to_simple_str(str: &str) -> String {
         format!("+{}\r\n", str)
     }
