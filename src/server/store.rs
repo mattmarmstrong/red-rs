@@ -1,5 +1,5 @@
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 use hashbrown::HashMap;
 
@@ -10,19 +10,19 @@ type R<T> = anyhow::Result<T, StoreError>;
 #[derive(Debug)]
 pub struct StoreValue {
     val: String,
-    expiry: Option<SystemTime>,
+    expiry: Option<Instant>,
 }
 
 impl StoreValue {
     pub fn new(val: String, exp: Option<Duration>) -> Self {
-        let expiry: Option<SystemTime> = exp.map(|exp| SystemTime::now() + exp);
+        let expiry: Option<Instant> = exp.map(|exp| Instant::now() + exp);
         Self { val, expiry }
     }
 
     #[inline]
     fn is_expired(&self) -> bool {
         match self.expiry {
-            Some(exp) => exp < SystemTime::now(),
+            Some(exp) => exp < Instant::now(),
             None => false,
         }
     }
@@ -32,7 +32,7 @@ impl StoreValue {
             "val: {}, expiry: {:#?}, now: {:#?}",
             self.val,
             self.expiry,
-            SystemTime::now()
+            Instant::now()
         );
         match self.is_expired() {
             false => Some(self.val.to_owned()),
