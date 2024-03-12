@@ -22,7 +22,7 @@ impl StoreValue {
     #[inline]
     fn is_expired(&self) -> bool {
         match self.expiry {
-            Some(exp) => exp < Instant::now(),
+            Some(exp) => exp > Instant::now(),
             None => false,
         }
     }
