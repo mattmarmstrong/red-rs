@@ -220,13 +220,13 @@ impl Command {
 
     #[inline]
     fn do_echo(arg: &String) -> String {
-        arg.to_owned()
+        Serializer::to_simple_str(arg)
     }
 
     fn do_get(key: &String, store: &Store) -> String {
         match store.try_read(key.to_owned()) {
             Ok(val) => match val {
-                Some(v) => v,
+                Some(v) => Serializer::to_bulk_str(&v),
                 None => "$-1\r\n".to_string(),
             },
             // TODO: handle read errors more gracefully
@@ -329,8 +329,8 @@ impl Command {
     pub async fn execute(&self, stream: &mut TcpStream, store: &Store) -> anyhow::Result<()> {
         let resp = match self {
             Self::PING => Command::do_ping(),
-            Self::Echo(s) => Serializer::to_simple_str(&Command::do_echo(s)),
-            Self::Get(key) => Serializer::to_bulk_str(&Command::do_get(key, store)),
+            Self::Echo(s) => Command::do_echo(s),
+            Self::Get(key) => Command::do_get(key, store),
             Self::Set(k, v, exp) => Command::do_set(k, v, exp, store),
         };
         println!("Sending: {}", resp);
