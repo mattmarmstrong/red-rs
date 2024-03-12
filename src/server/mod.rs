@@ -1,5 +1,6 @@
 pub mod command;
 pub mod errors;
+pub mod info;
 pub mod store;
 
 use tokio::io::AsyncReadExt;

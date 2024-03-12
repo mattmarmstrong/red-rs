@@ -7,8 +7,9 @@ use redis_starter_rust::server::handle_connection;
 use redis_starter_rust::server::store::Store;
 
 #[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
 struct Args {
-    #[arg(long)]
+    #[arg(long, short)]
     port: Option<u16>,
 }
 

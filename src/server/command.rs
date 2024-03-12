@@ -11,6 +11,7 @@ use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
 
 use super::errors::CommandError;
+use super::info::Info;
 use super::store::Store;
 
 #[derive(Debug, Eq)]
@@ -73,15 +74,19 @@ impl CommandEntry {
 lazy_static! {
     pub static ref COMMANDS: HashMap<String, CommandEntry> = {
         let mut commands = HashMap::new();
+
         // Command - ping
         let ping_entry = CommandEntry::new(0, None);
         commands.insert("ping".to_string(), ping_entry);
+
         // Command - echo
         let echo_entry = CommandEntry::new(1, None);
         commands.insert("echo".to_string(), echo_entry);
+
         // Command - get
         let get_entry = CommandEntry::new(1, None);
         commands.insert("get".to_string(), get_entry);
+
         // Command - set
         let mut set_options = HashSet::new();
         let px_entry = OptionEntry::new("px".to_string(), true);
@@ -89,7 +94,14 @@ lazy_static! {
         let set_entry = CommandEntry::new(2, Some(set_options));
         commands.insert("set".to_string(), set_entry);
 
-        // Command table
+        //Command - info
+        let mut info_options = HashSet::new();
+        let repl_entry = OptionEntry::new("replication".to_string(), false);
+        info_options.insert(repl_entry);
+        let info_entry = CommandEntry::new(1, Some(info_options));
+        commands.insert("info".to_string(), info_entry);
+
+        // Commands
         commands
     };
 }
@@ -115,6 +127,7 @@ pub enum Command {
     Echo(String),
     Get(String),
     Set(String, String, Option<Vec<CommandOption>>),
+    Info(String),
 }
 
 impl Command {
@@ -213,6 +226,14 @@ impl Command {
         }
     }
 
+    fn info(args: Vec<String>) -> R<Self> {
+        // TODO: refactor
+        let mut options = Command::parse_options("info", args)?;
+        debug_assert!(options.len() == 1);
+        let option = options.pop_front().unwrap();
+        Ok(Self::Info(option.name))
+    }
+
     #[inline]
     fn do_ping() -> String {
         "+PONG\r\n".to_string()
@@ -266,6 +287,13 @@ impl Command {
         }
     }
 
+    fn do_info(info_type: &String) -> String {
+        match info_type.as_str() {
+            "replication" => Serializer::to_bulk_str(&Info::new().replica()),
+            _ => todo!(),
+        }
+    }
+
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
         match str {
             // No args commands
@@ -277,6 +305,7 @@ impl Command {
                     "echo" => Command::echo(args),
                     "get" => Command::get(args),
                     "set" => Command::set(args),
+                    "info" => Command::info(args),
                     _ => Err(CommandError::NotFound),
                 }
             }
@@ -328,6 +357,7 @@ impl Command {
             Self::Echo(s) => Command::do_echo(s),
             Self::Get(key) => Command::do_get(key, store),
             Self::Set(k, v, exp) => Command::do_set(k, v, exp, store),
+            Self::Info(v) => Command::do_info(v),
         };
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
