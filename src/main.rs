@@ -1,14 +1,24 @@
 use std::net::SocketAddr;
 
-use redis_starter_rust::server::store::Store;
+use clap::{arg, Parser};
 use tokio::net::TcpListener;
 
 use redis_starter_rust::server::handle_connection;
+use redis_starter_rust::server::store::Store;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(long)]
+    port: Option<u16>,
+}
 
 #[tokio::main]
 async fn main() {
-    const PORT: u16 = 6379;
-    let socket = SocketAddr::from(([127, 0, 0, 1], PORT));
+    const DEFAULT_PORT: u16 = 6379;
+
+    let args = Args::parse();
+
+    let socket = SocketAddr::from(([127, 0, 0, 1], args.port.unwrap_or(DEFAULT_PORT)));
     let listener = TcpListener::bind(socket)
         .await
         .expect("Failed to bind to socket!");

@@ -297,11 +297,7 @@ impl Command {
         // Currently assumes that the array args are all string types.
         let mut str_arr = arr
             .iter()
-            .map(|data| {
-                let s = data.try_to_string().unwrap();
-                println!("Array arg: {}", s);
-                s
-            })
+            .map(|data| data.try_to_string().unwrap())
             .collect::<Vec<String>>();
         let first = str_arr.pop_front().unwrap();
         // COMMANDS currently stores only the number of required args.
@@ -333,7 +329,6 @@ impl Command {
             Self::Get(key) => Command::do_get(key, store),
             Self::Set(k, v, exp) => Command::do_set(k, v, exp, store),
         };
-        println!("Sending: {}", resp);
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
     }
@@ -350,7 +345,7 @@ mod tests {
     use super::{Command, CommandOption};
 
     #[test]
-    fn test_get() {
+    fn test_get_and_set() {
         let store = Store::new();
         let expiry = CommandOption::new("px".to_string(), Some("100".to_string()));
         let mut options = VecDeque::new();

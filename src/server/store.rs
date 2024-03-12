@@ -28,13 +28,6 @@ impl StoreValue {
     }
 
     pub fn to_val(&self) -> Option<String> {
-        println!(
-            "val: {}, expiry: {:#?}, now: {:#?}, is_expired: {}",
-            self.val,
-            self.expiry,
-            Instant::now(),
-            self.is_expired(),
-        );
         match self.is_expired() {
             false => Some(self.val.to_owned()),
             true => None,
