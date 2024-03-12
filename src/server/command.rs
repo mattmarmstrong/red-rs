@@ -333,7 +333,36 @@ impl Command {
             Self::Get(key) => Serializer::to_bulk_str(&Command::do_get(key, store)),
             Self::Set(k, v, exp) => Command::do_set(k, v, exp, store),
         };
+        println!("Sending: {}", resp);
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::collections::VecDeque;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    use super::Store;
+    use super::{Command, CommandOption};
+
+    #[test]
+    fn test_get() {
+        let store = Store::new();
+        let expiry = CommandOption::new("px".to_string(), Some("100".to_string()));
+        let mut options = VecDeque::new();
+        options.push_back(expiry);
+        Command::do_set(
+            &"test".to_string(),
+            &"val".to_string(),
+            &Some(options),
+            &store,
+        );
+        sleep(Duration::from_millis(101));
+        let get = Command::do_get(&"test".to_string(), &store);
+        assert_eq!(get, "$-1\r\n".to_string());
     }
 }
