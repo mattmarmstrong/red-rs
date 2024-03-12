@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
@@ -11,18 +12,77 @@ use crate::resp::serialize::Serializer;
 use super::errors::CommandError;
 use super::store::Store;
 
-// Eventually, this should have a function for every individual command.
-// Then we can dispatch actions accordingly
+#[derive(Debug, Eq)]
+struct OptionEntry {
+    name: String,
+    has_arg: bool,
+}
+
+impl PartialEq for OptionEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Hash for OptionEntry {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state)
+    }
+}
+
+impl OptionEntry {
+    fn new(name: String, has_arg: bool) -> Self {
+        Self { name, has_arg }
+    }
+}
+
+type OptionsEntry = Option<HashSet<OptionEntry>>;
+
+#[derive(Debug)]
+pub struct CommandEntry {
+    args: usize, // min. required args
+    options: OptionsEntry,
+}
+
+impl CommandEntry {
+    fn new(args: usize, options: OptionsEntry) -> Self {
+        Self { args, options }
+    }
+
+    #[inline]
+    pub fn has_opts(&self) -> bool {
+        self.options.is_some()
+    }
+
+    pub fn get_opt_entry(&self, opt: String) -> Option<OptionEntry> {
+        if self.options() {
+            self.options.unwrap().get(&opt)
+        } else {
+            None
+        }
+    }
+}
 
 lazy_static! {
-    // key: command name
-    // value: number of args
-    pub static ref COMMANDS: HashMap<String, usize> = {
+    pub static ref COMMANDS: HashMap<String, CommandEntry> = {
         let mut commands = HashMap::new();
-        commands.insert("ping".to_string(), 0);
-        commands.insert("echo".to_string(), 1);
-        commands.insert("get".to_string(), 1);
-        commands.insert("set".to_string(), 2);
+        // Command - ping
+        let ping_entry = CommandEntry::new(0, None);
+        commands.insert("ping".to_string(), ping_entry);
+        // Command - echo
+        let echo_entry = CommandEntry::new(1, None);
+        commands.insert("echo".to_string(), echo_entry);
+        // Command - get
+        let get_entry = CommandEntry::new(1, None);
+        commands.insert("get".to_string(), get_entry);
+        // Command - set
+        let set_options = HashSet::new();
+        let px_entry = OptionEntry::new("px".to_string(), true);
+        set_options.insert(px_entry);
+        let set_entry = CommandEntry::new(2, Some(set_options));
+        commands.insert("set".to_string(), set_entry);
+
+        // Command table
         commands
     };
 }
@@ -30,15 +90,85 @@ lazy_static! {
 type Vec<T> = VecDeque<T>;
 type R<T> = anyhow::Result<T, CommandError>;
 
+struct CommandOption {
+    name: String,
+    val: Option<String>,
+}
+
+impl CommandOption {
+    fn new(name: String, val: Option<String>) -> Self {
+        Self { name, val }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     PING,
     Echo(String),
     Get(String),
-    Set(String, String, Option<Duration>),
+    Set(String, String, Option<Vec<CommandOption>>),
 }
 
 impl Command {
+    fn parse_options(name: &str, mut args: Vec<String>) -> R<Vec<CommandOption>> {
+        // this is utterly disgusting
+        if let Some(entry) = COMMANDS.get(name) {
+            let mut buffer = Vec::new();
+            let n = args.len();
+            let mut i = 0;
+            while i < n {
+                match args.pop_front() {
+                    Some(name) => {
+                        // accounting for the arg that was just popped.
+                        i += 1;
+                        match entry.get_opt_entry(name) {
+                            Some(opt_entry) => {
+                                match !buffer.iter().any(|opt| name == opt.name) {
+                                    true => {
+                                        match opt_entry.has_arg {
+                                            true => {
+                                                match args.pop_front() {
+                                                    Some(val) => {
+                                                        // two args popped
+                                                        i += 1;
+                                                        let cmd_opt =
+                                                            CommandOption::new(name, Some(val));
+                                                        // duplicate args
+                                                        // valid arg
+                                                        buffer.push_back(cmd_opt);
+                                                    }
+                                                    None => {
+                                                        return Err(CommandError::InvalidArgs);
+                                                    }
+                                                }
+                                            }
+                                            false => {
+                                                let cmd_opt = CommandOption::new(name, None);
+                                                buffer.push_back(value);
+                                            }
+                                        }
+                                    }
+                                    false => {
+                                        return Err(CommandError::InvalidArgs);
+                                    }
+                                }
+                            }
+                            None => {
+                                return Err(CommandError::InvalidArgs);
+                            }
+                        }
+                    }
+                    None => {
+                        return Err(CommandError::InvalidArgs);
+                    }
+                }
+            }
+            Ok(buffer)
+        } else {
+            Err(CommandError::NotFound)
+        }
+    }
+
     fn ping() -> Result<Self, CommandError> {
         Ok(Self::PING)
     }
@@ -62,18 +192,15 @@ impl Command {
     fn set(mut args: Vec<String>) -> R<Self> {
         let key = args.pop_front();
         let val = args.pop_front();
-        let exp = args.pop_front();
         match (key, val) {
-            (Some(k), Some(v)) => match exp {
-                Some(dur) => match dur.parse::<u64>() {
-                    Ok(ms) => {
-                        let expiry = Some(Duration::from_millis(ms));
-                        Ok(Self::Set(k, v, expiry))
-                    }
-                    Err(_) => Err(CommandError::InvalidArgs),
-                },
-                None => Ok(Self::Set(k, v, None)),
-            },
+            (Some(k), Some(v)) => {
+                if args.len() > 0 {
+                    let options = Command::parse_options("set", args)?;
+                    Ok(Command::Set(k, v, Some(options)))
+                } else {
+                    Ok(Command::Set(k, v, None))
+                }
+            }
             _ => Err(CommandError::InvalidArgs),
         }
     }
@@ -99,7 +226,31 @@ impl Command {
         }
     }
 
-    fn do_set(key: &String, val: &String, exp: &Option<Duration>, store: &mut Store) -> String {
+    fn do_set(
+        key: &String,
+        val: &String,
+        options: Option<Vec<CommandOption>>,
+        store: &mut Store,
+    ) -> String {
+        let exp: Option<Duration>;
+        match options {
+            Some(opts) => {
+                // TODO: Support other options
+                match opts.iter().find(|opt| &opt.name == "px") {
+                    Some(opt) => {
+                        // this is handled before this point, unwrapping is safe
+                        match opt.val.unwrap().parse::<usize>() {
+                            Ok(dur) => {
+                                exp = Some(Duration::from_millis(dur));
+                            }
+                            Err(_) => panic!(),
+                        }
+                    }
+                    None => exp = None,
+                }
+            }
+            None => exp = None,
+        }
         match store.try_write(key.to_owned(), val.to_owned(), exp.to_owned()) {
             Ok(_) => "+OK\r\n".to_string(),
             // TODO: error handling
@@ -147,15 +298,15 @@ impl Command {
         let first = str_arr.pop_front().unwrap();
         // COMMANDS currently stores only the number of required args.
         // This should change.
-        match COMMANDS.get(&first) {
-            Some(_) => {
+        match COMMANDS.contains_key(&first) {
+            true => {
                 if str_arr.len() > 0 {
                     return Ok(Self::try_new(&first, Some(str_arr))?);
                 } else {
                     return Ok(Self::try_new(&first, None)?);
                 }
             }
-            None => Err(CommandError::NotFound),
+            false => Err(CommandError::NotFound),
         }
     }
 
