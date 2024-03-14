@@ -69,6 +69,6 @@ impl ReplicaInfo {
         let role = format("role", self.role.to_str());
         let master_repl_id = format("master_repl_id", &self.master_repl_id);
         let master_repl_offset = format("master_repl_offset", &self.master_repl_offset.to_string());
-        [&role, ":", &master_repl_id, ":", &master_repl_offset].concat()
+        [&role, "\r\n", &master_repl_id, "\r\n", &master_repl_offset].concat()
     }
 }
