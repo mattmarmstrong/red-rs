@@ -318,6 +318,7 @@ impl Command {
             Self::Set { key, val, px } => Command::do_set(key, val, px, &server),
             Self::Info(v) => Command::do_info(v.as_str(), &server),
         };
+        println!("Sending response: {}", resp);
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
     }
