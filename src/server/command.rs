@@ -248,7 +248,7 @@ impl Command {
 
     fn do_info(info_type: &str, server: &Server) -> String {
         match info_type {
-            "replication" => server.replica_info.to_string(),
+            "replication" => Serializer::to_bulk_str(&server.replica_info.to_string()),
             _ => todo!(),
         }
     }
