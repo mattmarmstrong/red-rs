@@ -11,13 +11,12 @@ use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
 
 use super::errors::CommandError;
-use super::info::Info;
-use super::store::Store;
+use super::Server;
 
 #[derive(Debug, Eq)]
 struct OptionEntry {
     name: String,
-    has_arg: bool,
+    args: Option<usize>,
 }
 
 impl PartialEq for OptionEntry {
@@ -39,31 +38,31 @@ impl Borrow<String> for OptionEntry {
 }
 
 impl OptionEntry {
-    fn new(name: String, has_arg: bool) -> Self {
-        Self { name, has_arg }
+    fn new(name: String, args: Option<usize>) -> Self {
+        Self { name, args }
     }
 }
 
-type OptionsEntry = Option<HashSet<OptionEntry>>;
+type OptionEntries = Option<HashSet<OptionEntry>>;
 
 #[derive(Debug)]
 pub struct CommandEntry {
     args: usize, // min. required args
-    options: OptionsEntry,
+    options: OptionEntries,
 }
 
 impl CommandEntry {
-    fn new(args: usize, options: OptionsEntry) -> Self {
+    fn new(args: usize, options: OptionEntries) -> Self {
         Self { args, options }
     }
 
     #[inline]
-    fn has_opts(&self) -> bool {
+    fn options(&self) -> bool {
         self.options.is_some()
     }
 
-    fn get_opt_entry(&self, opt: &String) -> Option<&OptionEntry> {
-        if self.has_opts() {
+    fn get_option_entry(&self, opt: &String) -> Option<&OptionEntry> {
+        if self.options() {
             self.options.as_ref().unwrap().get(opt)
         } else {
             None
@@ -89,14 +88,14 @@ lazy_static! {
 
         // Command - set
         let mut set_options = HashSet::new();
-        let px_entry = OptionEntry::new("px".to_string(), true);
+        let px_entry = OptionEntry::new("px".to_string(), Some(1));
         set_options.insert(px_entry);
         let set_entry = CommandEntry::new(2, Some(set_options));
         commands.insert("set".to_string(), set_entry);
 
         //Command - info
         let mut info_options = HashSet::new();
-        let repl_entry = OptionEntry::new("replication".to_string(), false);
+        let repl_entry = OptionEntry::new("replication".to_string(), None);
         info_options.insert(repl_entry);
         let info_entry = CommandEntry::new(1, Some(info_options));
         commands.insert("info".to_string(), info_entry);
@@ -112,11 +111,11 @@ type R<T> = anyhow::Result<T, CommandError>;
 #[derive(Debug)]
 pub struct CommandOption {
     name: String,
-    val: Option<String>,
+    val: Option<Vec<String>>,
 }
 
 impl CommandOption {
-    fn new(name: String, val: Option<String>) -> Self {
+    fn new(name: String, val: Option<Vec<String>>) -> Self {
         Self { name, val }
     }
 }
@@ -126,68 +125,41 @@ pub enum Command {
     PING,
     Echo(String),
     Get(String),
-    Set(String, String, Option<Vec<CommandOption>>),
+    Set {
+        key: String,
+        val: String,
+        px: Option<Duration>,
+    },
     Info(String),
 }
 
 impl Command {
     fn parse_options(name: &str, mut args: Vec<String>) -> R<Vec<CommandOption>> {
-        // this is utterly disgusting
-        if let Some(entry) = COMMANDS.get(name) {
-            let mut buffer: Vec<CommandOption> = Vec::new();
-            let n = args.len();
-            let mut i = 0;
-            while i < n {
-                match args.pop_front() {
-                    Some(name) => {
-                        // accounting for the arg that was just popped.
-                        i += 1;
-                        match entry.get_opt_entry(&name) {
-                            Some(opt_entry) => {
-                                match !buffer.iter().any(|opt| name == opt.name) {
-                                    true => {
-                                        match opt_entry.has_arg {
-                                            true => {
-                                                match args.pop_front() {
-                                                    Some(val) => {
-                                                        // two args popped
-                                                        i += 1;
-                                                        let cmd_opt =
-                                                            CommandOption::new(name, Some(val));
-                                                        // duplicate args
-                                                        // valid arg
-                                                        buffer.push_back(cmd_opt);
-                                                    }
-                                                    None => {
-                                                        return Err(CommandError::InvalidArgs);
-                                                    }
-                                                }
-                                            }
-                                            false => {
-                                                let cmd_opt = CommandOption::new(name, None);
-                                                buffer.push_back(cmd_opt);
-                                            }
-                                        }
-                                    }
-                                    false => {
-                                        return Err(CommandError::InvalidArgs);
-                                    }
-                                }
-                            }
-                            None => {
-                                return Err(CommandError::InvalidArgs);
-                            }
+        let mut buffer = Vec::new();
+        // it's on the caller to ensure that this won't panic
+        let entry = COMMANDS.get(name).unwrap();
+        while let Some(arg) = args.pop_front() {
+            match entry.get_option_entry(&arg) {
+                Some(o_entry) => {
+                    if let Some(n) = o_entry.args {
+                        if n > args.len() {
+                            return Err(CommandError::InvalidArgs);
+                        };
+                        let mut vals = Vec::with_capacity(n);
+                        for _ in 0..n {
+                            vals.push_back(args.pop_front().unwrap())
                         }
-                    }
-                    None => {
-                        return Err(CommandError::InvalidArgs);
+                        let cmd_o = CommandOption::new(o_entry.name.to_owned(), Some(vals));
+                        buffer.push_back(cmd_o);
+                    } else {
+                        let cmd_o = CommandOption::new(o_entry.name.to_owned(), None);
+                        buffer.push_back(cmd_o);
                     }
                 }
+                None => return Err(CommandError::InvalidOption),
             }
-            Ok(buffer)
-        } else {
-            Err(CommandError::NotFound)
         }
+        Ok(buffer)
     }
 
     fn ping() -> Result<Self, CommandError> {
@@ -211,15 +183,26 @@ impl Command {
     }
 
     fn set(mut args: Vec<String>) -> R<Self> {
-        let key = args.pop_front();
-        let val = args.pop_front();
-        match (key, val) {
-            (Some(k), Some(v)) => {
+        let k = args.pop_front();
+        let v = args.pop_front();
+        match (k, v) {
+            (Some(key), Some(val)) => {
                 if !args.is_empty() {
-                    let options = Command::parse_options("set", args)?;
-                    Ok(Command::Set(k, v, Some(options)))
+                    let mut options = Command::parse_options("set", args)?;
+                    // one arg for this right now, this is fine. Should do a for_each and map each
+                    // option to it's named counterpart.
+                    let px_o = options.pop_front().unwrap();
+                    let px_val = px_o.val.unwrap().pop_front().unwrap();
+                    match px_val.parse::<u64>() {
+                        Ok(px) => Ok(Command::Set {
+                            key,
+                            val,
+                            px: Some(Duration::from_millis(px)),
+                        }),
+                        Err(_) => Err(CommandError::InvalidArgs),
+                    }
                 } else {
-                    Ok(Command::Set(k, v, None))
+                    Ok(Command::Set { key, val, px: None })
                 }
             }
             _ => Err(CommandError::InvalidArgs),
@@ -240,12 +223,12 @@ impl Command {
     }
 
     #[inline]
-    fn do_echo(arg: &String) -> String {
+    fn do_echo(arg: &str) -> String {
         Serializer::to_simple_str(arg)
     }
 
-    fn do_get(key: &String, store: &Store) -> String {
-        match store.try_read(key.to_owned()) {
+    fn do_get(key: String, server: &Server) -> String {
+        match server.store.try_read(key.to_owned()) {
             Ok(val) => match val {
                 Some(v) => Serializer::to_bulk_str(&v),
                 None => "$-1\r\n".to_string(),
@@ -255,41 +238,17 @@ impl Command {
         }
     }
 
-    fn do_set(
-        key: &String,
-        val: &String,
-        options: &Option<Vec<CommandOption>>,
-        store: &Store,
-    ) -> String {
-        let exp: Option<Duration>;
-        match options {
-            Some(opts) => {
-                // TODO: Support other options
-                match opts.iter().find(|opt| &opt.name == "px") {
-                    Some(opt) => {
-                        // this is handled before this point, unwrapping is safe
-                        match opt.val.to_owned().unwrap().parse::<u64>() {
-                            Ok(dur) => {
-                                exp = Some(Duration::from_millis(dur));
-                            }
-                            Err(_) => panic!(),
-                        }
-                    }
-                    None => exp = None,
-                }
-            }
-            None => exp = None,
-        }
-        match store.try_write(key.to_owned(), val.to_owned(), exp) {
+    fn do_set(key: String, val: String, exp: Option<Duration>, server: &Server) -> String {
+        match server.store.try_write(key, val, exp) {
             Ok(_) => "+OK\r\n".to_string(),
             // TODO: error handling
             Err(_) => "$-1\r\n".to_string(),
         }
     }
 
-    fn do_info(info_type: &String) -> String {
-        match info_type.as_str() {
-            "replication" => Serializer::to_bulk_str(&Info::new().replica()),
+    fn do_info(info_type: &str, server: &Server) -> String {
+        match info_type {
+            "replication" => server.replica_info.to_string(),
             _ => todo!(),
         }
     }
@@ -351,13 +310,13 @@ impl Command {
         }
     }
 
-    pub async fn execute(&self, stream: &mut TcpStream, store: &Store) -> anyhow::Result<()> {
+    pub async fn execute(self, stream: &mut TcpStream, server: &Server) -> anyhow::Result<()> {
         let resp = match self {
             Self::PING => Command::do_ping(),
-            Self::Echo(s) => Command::do_echo(s),
-            Self::Get(key) => Command::do_get(key, store),
-            Self::Set(k, v, exp) => Command::do_set(k, v, exp, store),
-            Self::Info(v) => Command::do_info(v),
+            Self::Echo(s) => Command::do_echo(s.as_str()),
+            Self::Get(key) => Command::do_get(key, &server),
+            Self::Set { key, val, px } => Command::do_set(key, val, px, &server),
+            Self::Info(v) => Command::do_info(v.as_str(), &server),
         };
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
@@ -371,23 +330,28 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    use super::Store;
-    use super::{Command, CommandOption};
+    use super::Command;
+    use super::Server;
 
     #[test]
     fn test_get_and_set() {
-        let store = Store::new();
-        let expiry = CommandOption::new("px".to_string(), Some("100".to_string()));
-        let mut options = VecDeque::new();
-        options.push_back(expiry);
-        Command::do_set(
-            &"test".to_string(),
-            &"val".to_string(),
-            &Some(options),
-            &store,
-        );
+        let server = Server::default(8000);
+        let mut args = VecDeque::with_capacity(4);
+        args.push_back("test".to_string());
+        args.push_back("val".to_string());
+        args.push_back("px".to_string());
+        args.push_back("100".to_string());
+        let set = Command::set(args).unwrap();
+        let resp: String;
+        match set {
+            Command::Set { key, val, px } => {
+                resp = Command::do_set(key, val, px, &server);
+            }
+            _ => panic!(),
+        }
+        assert_eq!("+OK\r\n".to_string(), resp);
         sleep(Duration::from_millis(101));
-        let get = Command::do_get(&"test".to_string(), &store);
+        let get = Command::do_get("test".to_string(), &server);
         assert_eq!(get, "$-1\r\n".to_string());
     }
 }

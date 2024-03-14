@@ -2,6 +2,7 @@
 pub enum CommandError {
     NotFound,
     InvalidArgs,
+    InvalidOption,
     CommandFailed,
 }
 
@@ -13,6 +14,9 @@ impl std::fmt::Display for CommandError {
             }
             Self::InvalidArgs => {
                 write!(f, "Command Error: Invalid args!")
+            }
+            Self::InvalidOption => {
+                write!(f, "Command Error: Invalid option!")
             }
             Self::CommandFailed => {
                 write!(f, "Command Error: Command failed!")
