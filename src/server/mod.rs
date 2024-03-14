@@ -34,10 +34,23 @@ impl Server {
         Self::new(port, Store::new(), ReplicaInfo::default())
     }
 
-    pub fn replicate(port: u16, _master_port: u16) -> Self {
-        let replica = Self::new(port, Store::new(), ReplicaInfo::replica());
-        // master.replica_info.connected_slaves += 1;
+    pub fn replicate(
+        port: u16,
+        _master_port: u16,
+        master_repl_id: String,
+        master_repl_offset: usize,
+    ) -> Self {
+        let replica = Self::new(
+            port,
+            Store::new(),
+            ReplicaInfo::replica(master_repl_id, master_repl_offset),
+        );
+        // self.replica_info.connected_slaves += 1;
         replica
+    }
+
+    pub fn fake_replicate(port: u16, _master_port: u16) -> Self {
+        Self::new(port, Store::new(), ReplicaInfo::fake_replica())
     }
 }
 

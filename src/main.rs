@@ -30,7 +30,7 @@ async fn main() {
             "localhost" => Ipv4Addr::LOCALHOST,
             s => Ipv4Addr::from_str(s).unwrap(),
         };
-        server = Arc::new(Server::replicate(
+        server = Arc::new(Server::fake_replicate(
             args.port.unwrap_or(DEFAULT_PORT),
             master_port,
         ));

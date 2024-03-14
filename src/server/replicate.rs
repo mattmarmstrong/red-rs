@@ -1,3 +1,19 @@
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
+
+fn gen_master_repl_id() -> String {
+    thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(40)
+        .map(char::from)
+        .collect()
+}
+
+#[inline]
+fn format(key: &str, val: &str) -> String {
+    [key, ":", val].concat()
+}
+
 #[derive(Debug, Clone)]
 pub enum Role {
     Master,
@@ -17,30 +33,42 @@ impl Role {
 pub struct ReplicaInfo {
     pub role: Role,
     pub connected_slaves: usize,
+    pub master_repl_id: String,
+    pub master_repl_offset: usize,
 }
 
 impl ReplicaInfo {
-    pub fn new(role: Role, connected_slaves: usize) -> Self {
+    pub fn new(
+        role: Role,
+        connected_slaves: usize,
+        master_repl_id: String,
+        master_repl_offset: usize,
+    ) -> Self {
         Self {
             role,
             connected_slaves,
+            master_repl_id,
+            master_repl_offset,
         }
     }
 
     pub fn default() -> Self {
-        Self::new(Role::Master, 0)
+        Self::new(Role::Master, 0, gen_master_repl_id(), 0)
     }
 
-    pub fn replica() -> Self {
-        Self::new(Role::Slave, 0)
+    // fake it till you make it
+    pub fn fake_replica() -> Self {
+        Self::new(Role::Slave, 0, gen_master_repl_id(), 0)
     }
 
-    #[inline]
-    fn format(key: &str, val: &str) -> String {
-        [key, ":", val].concat()
+    pub fn replica(master_repl_id: String, master_repl_offset: usize) -> Self {
+        Self::new(Role::Slave, 0, master_repl_id, master_repl_offset)
     }
 
     pub fn to_string(&self) -> String {
-        ReplicaInfo::format("role", self.role.to_str())
+        let role = format("role", self.role.to_str());
+        let master_repl_id = format("master_repl_id", &self.master_repl_id);
+        let master_repl_offset = format("master_repl_offset", &self.master_repl_offset.to_string());
+        [&role, ":", &master_repl_id, ":", &master_repl_offset].concat()
     }
 }
