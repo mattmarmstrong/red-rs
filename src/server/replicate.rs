@@ -33,7 +33,7 @@ impl Role {
 pub struct ReplicaInfo {
     pub role: Role,
     pub connected_slaves: usize,
-    pub master_repl_id: String,
+    pub master_replid: String,
     pub master_repl_offset: usize,
 }
 
@@ -41,13 +41,13 @@ impl ReplicaInfo {
     pub fn new(
         role: Role,
         connected_slaves: usize,
-        master_repl_id: String,
+        master_replid: String,
         master_repl_offset: usize,
     ) -> Self {
         Self {
             role,
             connected_slaves,
-            master_repl_id,
+            master_replid,
             master_repl_offset,
         }
     }
@@ -67,7 +67,7 @@ impl ReplicaInfo {
 
     pub fn to_string(&self) -> String {
         let role = format("role", self.role.to_str());
-        let master_repl_id = format("master_repl_id", &self.master_repl_id);
+        let master_repl_id = format("master_replid", &self.master_repl_id);
         let master_repl_offset = format("master_repl_offset", &self.master_repl_offset.to_string());
         [&role, "\r\n", &master_repl_id, "\r\n", &master_repl_offset].concat()
     }
