@@ -97,7 +97,7 @@ pub fn read_bytes_sync(stream: &mut std::net::TcpStream) -> [u8; 1024] {
     buffer
 }
 
-pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> anyhow::Result<()> {
+pub async fn read_bytes_async(stream: &mut TcpStream) -> [u8; 1024] {
     let mut buffer = [0u8; 1024];
     loop {
         let bytes_read = stream
@@ -108,7 +108,12 @@ pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> a
             break;
         }
     }
-    let mut parser = Parser::new(&buffer);
+    buffer
+}
+
+pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> anyhow::Result<()> {
+    let bytes = read_bytes_async(stream).await;
+    let mut parser = Parser::new(&bytes);
     let data = parser.parse()?;
     if let Some(cmd) = Command::new(data) {
         cmd.execute(stream, &server).await?;
