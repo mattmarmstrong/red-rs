@@ -3,7 +3,6 @@ pub mod errors;
 pub mod replicate;
 pub mod store;
 
-use std::io::Read;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -86,24 +85,13 @@ pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Ar
     }
 }
 
-pub fn read_bytes_sync(stream: &mut std::net::TcpStream) -> [u8; 1024] {
-    let mut buffer = [0u8; 1024];
-    loop {
-        let bytes_read = stream.read(&mut buffer).expect("Failed to read (sync)!");
-        if bytes_read == 0 {
-            break;
-        }
-    }
-    buffer
-}
-
-pub async fn read_bytes_async(stream: &mut TcpStream) -> [u8; 1024] {
+pub async fn read_bytes(stream: &mut TcpStream) -> [u8; 1024] {
     let mut buffer = [0u8; 1024];
     loop {
         let bytes_read = stream
             .read(&mut buffer)
             .await
-            .expect("Failed to read (async)!");
+            .expect("Failed to read from TCP stream!");
         if bytes_read == 0 {
             break;
         }
@@ -112,7 +100,7 @@ pub async fn read_bytes_async(stream: &mut TcpStream) -> [u8; 1024] {
 }
 
 pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> anyhow::Result<()> {
-    let bytes = read_bytes_async(stream).await;
+    let bytes = read_bytes(stream).await;
     let mut parser = Parser::new(&bytes);
     let data = parser.parse()?;
     if let Some(cmd) = Command::new(data) {
