@@ -17,7 +17,6 @@ impl Serializer {
         buffer.push_str("\r\n");
         strs.iter()
             .for_each(|s| buffer.push_str(&Self::to_bulk_str(s)));
-        println!("{}", &buffer);
         buffer
     }
 }

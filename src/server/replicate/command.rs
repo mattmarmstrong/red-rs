@@ -18,6 +18,7 @@ pub fn do_repl_handshake(server: &Server) -> R<()> {
         Ok(mut master_stream) => {
             let ping_str = Serializer::to_bulk_str("ping");
             let ping = Serializer::to_arr(Vec::from([ping_str]));
+            println!("{}", ping);
             master_stream
                 .write_all(ping.as_bytes())
                 .expect("Failed to write!");
