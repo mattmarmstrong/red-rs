@@ -16,8 +16,7 @@ pub fn do_repl_handshake(server: &Server) -> R<()> {
     debug_assert!(server.master_addr().is_some());
     match TcpStream::connect(server.master_addr().unwrap()) {
         Ok(mut master_stream) => {
-            let ping_str = Serializer::to_bulk_str("ping");
-            let ping = Serializer::to_arr(Vec::from([ping_str]));
+            let ping = Serializer::to_arr(Vec::from(["ping"]));
             println!("{}", ping);
             master_stream
                 .write_all(ping.as_bytes())
