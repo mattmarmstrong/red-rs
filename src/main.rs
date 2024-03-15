@@ -1,11 +1,12 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::str::FromStr;
 use std::sync::Arc;
 
 use clap::{arg, Parser};
+use redis_starter_rust::server::replicate::info::Role;
 use tokio::net::TcpListener;
 
-use redis_starter_rust::server::{handle_connection, Server};
+use redis_starter_rust::server::replicate::command::do_repl_handshake;
+use redis_starter_rust::server::{handle_connection, init_on_startup, Server};
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -18,27 +19,16 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
-    const DEFAULT_PORT: u16 = 6379;
-    const DEFAULT_IP: Ipv4Addr = Ipv4Addr::LOCALHOST;
-
     let args = Args::parse();
 
-    let server: Arc<Server>;
-    if let Some(mut repl_info) = args.replicaof {
-        let master_port = repl_info.pop().unwrap().parse::<u16>().unwrap();
-        let _master_ip = match repl_info.pop().unwrap().to_lowercase().as_str() {
-            "localhost" => Ipv4Addr::LOCALHOST,
-            s => Ipv4Addr::from_str(s).unwrap(),
-        };
-        server = Arc::new(Server::fake_replicate(
-            args.port.unwrap_or(DEFAULT_PORT),
-            master_port,
-        ));
-    } else {
-        server = Arc::new(Server::default(args.port.unwrap_or(DEFAULT_PORT)));
-    }
+    let server: Arc<Server> = init_on_startup(args.port, args.replicaof);
 
-    let socket = SocketAddrV4::new(DEFAULT_IP, server.port);
+    // Move me
+    if server.replica_info.role == Role::Slave {
+        do_repl_handshake(&server).await.unwrap_or(());
+    }
+    // TODO -> un-hardcode localhost
+    let socket = SocketAddrV4::new(Ipv4Addr::LOCALHOST, server.port);
     let listener = TcpListener::bind(socket)
         .await
         .expect("Failed to bind to socket!");

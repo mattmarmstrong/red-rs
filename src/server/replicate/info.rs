@@ -14,7 +14,7 @@ fn format(key: &str, val: &str) -> String {
     [key, ":", val].concat()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Role {
     Master,
     Slave,
@@ -65,6 +65,7 @@ impl ReplicaInfo {
         Self::new(Role::Slave, 0, master_replid, master_repl_offset)
     }
 
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         let role = format("role", self.role.to_str());
         let master_replid = format("master_replid", &self.master_replid);

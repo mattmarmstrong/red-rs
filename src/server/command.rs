@@ -1,3 +1,7 @@
+// This file is intended to include all server <-> client commands
+// Other commands like master <-> slave commands should exist elsewhere.
+// Those commands may get called in those contexts
+
 use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -314,9 +318,9 @@ impl Command {
         let resp = match self {
             Self::PING => Command::do_ping(),
             Self::Echo(s) => Command::do_echo(s.as_str()),
-            Self::Get(key) => Command::do_get(key, &server),
-            Self::Set { key, val, px } => Command::do_set(key, val, px, &server),
-            Self::Info(v) => Command::do_info(v.as_str(), &server),
+            Self::Get(key) => Command::do_get(key, server),
+            Self::Set { key, val, px } => Command::do_set(key, val, px, server),
+            Self::Info(v) => Command::do_info(v.as_str(), server),
         };
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
