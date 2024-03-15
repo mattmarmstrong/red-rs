@@ -5,7 +5,7 @@ use clap::{arg, Parser};
 use redis_starter_rust::server::replicate::info::Role;
 use tokio::net::TcpListener;
 
-use redis_starter_rust::server::replicate::command::do_repl_handshake;
+use redis_starter_rust::server::replicate::command::do_slave_handshake;
 use redis_starter_rust::server::{handle_connection, init_on_startup, Server};
 
 #[derive(Parser, Debug)]
@@ -25,7 +25,7 @@ async fn main() {
 
     // Move me
     if server.replica_info.role == Role::Slave {
-        do_repl_handshake(&server).unwrap_or(());
+        do_slave_handshake(&server).await.unwrap_or(());
     }
     // TODO -> un-hardcode localhost
     let socket = SocketAddrV4::new(Ipv4Addr::LOCALHOST, server.port);

@@ -1,6 +1,6 @@
 // This file is intended to include all server <-> client commands
-// Other commands like master <-> slave commands should exist elsewhere.
-// Those commands may get called in those contexts
+// Other commands (like slave-specifc commands) should exist elsewhere.
+// These commands may get called in those contexts;
 
 use std::borrow::Borrow;
 use std::collections::VecDeque;
