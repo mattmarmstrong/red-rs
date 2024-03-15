@@ -14,6 +14,20 @@ pub enum DataType {
 }
 
 impl DataType {
+    pub fn is_str(self, resp: &str) -> bool {
+        match self {
+            DataType::SimpleString(s) | DataType::BulkString(s) => s.as_str() == resp,
+            DataType::Array(mut arr) => {
+                if arr.len() == 1 {
+                    DataType::is_str(arr.pop_front().unwrap(), resp)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
     pub fn cmp_str(&self, cmp: &str) -> bool {
         let a = match self {
             DataType::SimpleString(s) => s,

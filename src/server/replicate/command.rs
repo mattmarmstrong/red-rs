@@ -14,7 +14,7 @@ type R<T> = anyhow::Result<T, ReplError>;
 
 fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
     if let Ok(resp) = Parser::new(actual).parse() {
-        match resp.cmp_str(expected) {
+        match resp.is_str(expected) {
             true => Ok(()),
             false => Err(ReplError::UnexpectedResponse),
         }
