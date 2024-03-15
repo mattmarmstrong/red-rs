@@ -98,7 +98,7 @@ pub fn read_bytes_sync(stream: &mut std::net::TcpStream) -> [u8; 1024] {
 }
 
 pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> anyhow::Result<()> {
-    let mut buffer = [0; 1024];
+    let mut buffer = [0u8; 1024];
     loop {
         let bytes_read = stream
             .read(&mut buffer)

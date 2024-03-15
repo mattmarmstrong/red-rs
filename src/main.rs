@@ -24,9 +24,9 @@ async fn main() {
     let server: Arc<Server> = init_on_startup(args.port, args.replicaof);
 
     // Move me
-    if server.replica_info.role == Role::Slave {
-        do_slave_handshake(&server).unwrap_or(());
-    }
+    // if server.replica_info.role == Role::Slave {
+    // do_slave_handshake(&server).unwrap_or(());
+    // }
     // TODO -> un-hardcode localhost
     let socket = SocketAddrV4::new(Ipv4Addr::LOCALHOST, server.port);
     let listener = TcpListener::bind(socket)
