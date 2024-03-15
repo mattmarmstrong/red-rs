@@ -3,7 +3,6 @@ pub mod errors;
 pub mod replicate;
 pub mod store;
 
-use std::io::Read;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -84,17 +83,6 @@ pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Ar
         }
         None => Arc::new(Server::default(port)),
     }
-}
-
-pub fn read_bytes_sync(stream: &mut std::net::TcpStream) -> [u8; 1024] {
-    let mut buffer = [0u8; 1024];
-    loop {
-        let bytes_read = stream.read(&mut buffer).expect("Failed to read (sync)!");
-        if bytes_read == 0 {
-            break;
-        }
-    }
-    buffer
 }
 
 pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> anyhow::Result<()> {
