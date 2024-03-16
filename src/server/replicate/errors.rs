@@ -3,7 +3,7 @@ pub enum ReplError {
     FailedToConnect,
     InvalidResponse,
     UnexpectedResponse,
-    MasterHandshakeFailed,
+    HandshakeFailed,
 }
 
 impl std::fmt::Display for ReplError {
@@ -18,7 +18,7 @@ impl std::fmt::Display for ReplError {
             Self::UnexpectedResponse => {
                 write!(f, "REPL Error: Unexpected response!")
             }
-            Self::MasterHandshakeFailed => {
+            Self::HandshakeFailed => {
                 write!(f, "REPL Error: Master handshake failed!")
             }
         }

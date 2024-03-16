@@ -69,6 +69,6 @@ pub fn do_repl_handshake(server: &Server) -> R<()> {
                 .expect("Failed to write!");
             Ok(())
         }
-        Err(_) => Err(ReplError::CommandFailed),
+        Err(_) => Err(ReplError::HandshakeFailed),
     }
 }
