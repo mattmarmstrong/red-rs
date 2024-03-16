@@ -23,6 +23,7 @@ fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
 
 async fn read_bytes(stream: &mut TcpStream) -> [u8; 1024] {
     let mut buffer = [0u8; 1024];
+    let _ = stream.readable().await;
     loop {
         let bytes_read = stream
             .read(&mut buffer)
@@ -77,7 +78,7 @@ pub async fn do_repl_handshake(server: &Server) -> R<()> {
                 .write_all(ping.as_bytes())
                 .await
                 .expect("Failed to write!");
-            let resp = read_bytes(&mut stream).await;
+            let resp = read_bytes(&mut stream);
 
             // do_follower_listen(&mut stream, &server)?;
             // do_follower_psync(&mut stream)?;
