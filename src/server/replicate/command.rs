@@ -72,14 +72,6 @@ pub fn do_repl_handshake(server: &Server) -> R<()> {
             let ping = Serializer::to_arr(Vec::from(["ping"]));
             stream.write_all(ping.as_bytes()).expect("Failed to write!");
             let mut buffer = [0u8; 1024];
-            loop {
-                let bytes_read = stream
-                    .read(&mut buffer)
-                    .expect("Failed to read from client stream!");
-                if bytes_read == 0 {
-                    break;
-                }
-            }
             // do_follower_listen(&mut stream, &server)?;
             // do_follower_psync(&mut stream)?;
             Ok(())
