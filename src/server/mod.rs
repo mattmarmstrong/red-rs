@@ -1,4 +1,5 @@
 pub mod command;
+pub mod connection;
 pub mod errors;
 pub mod replicate;
 pub mod store;

@@ -1,13 +1,13 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 
 use crate::resp::parse::Parser;
+
 use crate::resp::serialize::Serializer;
+use crate::server::connection::Connection;
 use crate::server::Server;
 
 use super::errors::ReplError;
 
-// Put code to communicate between replicas here
 type R<T> = anyhow::Result<T, ReplError>;
 
 fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
@@ -21,73 +21,41 @@ fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
     }
 }
 
-async fn read_loop(read_stream: &mut ReadHalf<TcpStream>) -> [u8; 1024] {
-    let mut buffer = [0u8; 1024];
-    loop {
-        let bytes_read = read_stream
-            .read(&mut buffer)
-            .await
-            .expect("Failed to read from client stream!");
-        if bytes_read == 0 {
-            break;
-        }
-    }
-    buffer
-}
-
-async fn do_follower_ping(
-    read_stream: &mut ReadHalf<TcpStream>,
-    write_stream: &mut WriteHalf<TcpStream>,
-) -> R<()> {
+async fn do_follower_ping(c: &mut Connection) -> R<()> {
     let ping = Serializer::to_arr(Vec::from(["ping"]));
-    write_stream
-        .write_all(ping.as_bytes())
-        .await
-        .expect("Failed to write!");
-    let ping_resp = read_loop(read_stream).await;
+    c.write(ping).await.unwrap();
+    let ping_resp = c.read().await.expect("Read failed!");
     expected_response("ping", &ping_resp)
 }
 
-async fn do_follower_listen(
-    read_stream: &mut ReadHalf<TcpStream>,
-    write_stream: &mut WriteHalf<TcpStream>,
-    server: &Server,
-) -> R<()> {
+async fn do_follower_listen(c: &mut Connection, server: &Server) -> R<()> {
     let listen = Serializer::to_arr(Vec::from([
         "REPLCONF",
         "listening-port",
         &server.port.to_string(),
     ]));
-    write_stream
-        .write_all(listen.as_bytes())
-        .await
-        .expect("Failed to write!");
-    let listen_resp = read_loop(read_stream).await;
+    c.write(listen).await.unwrap();
+    let listen_resp = c.read().await.expect("Read failed!");
     expected_response("ok", &listen_resp)
 }
-async fn do_follower_psync(
-    read_stream: &mut ReadHalf<TcpStream>,
-    write_stream: &mut WriteHalf<TcpStream>,
-) -> R<()> {
+async fn do_follower_psync(c: &mut Connection) -> R<()> {
     let psync = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
-    write_stream
-        .write_all(psync.as_bytes())
-        .await
-        .expect("Failed to write!");
-    let listen_resp = read_loop(read_stream).await;
+    c.write(psync).await.unwrap();
+    let listen_resp = c.read().await.expect("Read failed!");
     expected_response("ok", &listen_resp)
 }
 
 pub async fn do_repl_handshake(server: &Server) -> R<()> {
     // TODO -> The rest of the repl_handshake
-    match TcpStream::connect(server.master_addr().unwrap()).await {
-        Ok(stream) => {
-            let (mut read_stream, mut write_stream) = tokio::io::split(stream);
-            do_follower_ping(&mut read_stream, &mut write_stream).await?;
-            do_follower_listen(&mut read_stream, &mut write_stream, &server).await?;
-            do_follower_psync(&mut read_stream, &mut write_stream).await?;
-            Ok(())
-        }
-        Err(_) => Err(ReplError::HandshakeFailed),
-    }
+    let stream = TcpStream::connect(server.master_addr().unwrap())
+        .await
+        .expect("Failed to connect!");
+    let mut connect = Connection::new(stream);
+    do_follower_ping(&mut connect).await?;
+    connect.buf_clear().unwrap();
+    do_follower_listen(&mut connect, server).await?;
+    connect.buf_clear().unwrap();
+    do_follower_psync(&mut connect).await?;
+    connect.buf_clear().unwrap();
+    Ok(())
 }
