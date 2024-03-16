@@ -70,8 +70,8 @@ pub fn do_repl_handshake(server: &Server) -> R<()> {
     match TcpStream::connect(server.master_addr().unwrap()) {
         Ok(mut stream) => {
             do_follower_ping(&mut stream)?;
-            do_follower_listen(&mut stream, &server)?;
-            do_follower_psync(&mut stream)?;
+            // do_follower_listen(&mut stream, &server)?;
+            // do_follower_psync(&mut stream)?;
             Ok(())
         }
         Err(_) => Err(ReplError::HandshakeFailed),
