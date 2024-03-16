@@ -77,7 +77,7 @@ pub async fn do_repl_handshake(server: &Server) -> R<()> {
                 .write_all(ping.as_bytes())
                 .await
                 .expect("Failed to write!");
-            let mut buffer = [0u8; 1024];
+            let resp = read_bytes(&mut stream).await;
 
             // do_follower_listen(&mut stream, &server)?;
             // do_follower_psync(&mut stream)?;
