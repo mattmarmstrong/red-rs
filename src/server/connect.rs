@@ -45,8 +45,4 @@ impl Connection {
         self.stream.flush().await.expect("Flush failed!");
         Ok(())
     }
-
-    pub async fn resp(&mut self) {
-        self.stream.next()
-    }
 }
