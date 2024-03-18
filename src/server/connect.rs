@@ -24,7 +24,9 @@ impl Connection {
     }
 
     pub async fn read(&mut self) -> R<&mut BytesMut> {
+        println!("READING!");
         loop {
+            println!("LOOPING");
             self.stream.readable().await.expect("Stream not readable!");
             let bytes_read = self
                 .stream
@@ -39,6 +41,7 @@ impl Connection {
     }
 
     pub async fn write(&mut self, msg: String) -> R<()> {
+        println!("WRITING! MSG: {}", msg);
         self.stream
             .write_all(msg.as_bytes())
             .await
