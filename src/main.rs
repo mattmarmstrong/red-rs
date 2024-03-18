@@ -25,7 +25,10 @@ async fn main() {
 
     // Move me
     if server.replica_info.role == Role::Slave {
-        do_repl_handshake(&server).await.unwrap_or(());
+        let s_clone = Arc::clone(&server);
+        tokio::spawn(async move {
+            do_repl_handshake(&s_clone).await.unwrap_or(());
+        });
     }
     // TODO -> un-hardcode localhost
     let socket = SocketAddrV4::new(Ipv4Addr::LOCALHOST, server.port);

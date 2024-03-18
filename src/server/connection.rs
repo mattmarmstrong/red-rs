@@ -45,7 +45,7 @@ impl Connection {
             .write_all(msg.as_bytes())
             .await
             .expect("Write failed!");
-        self.stream.flush().await;
+        self.stream.flush().await.expect("Flush failed!");
         Ok(())
     }
 }
