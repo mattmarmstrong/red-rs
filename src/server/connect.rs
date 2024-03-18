@@ -33,6 +33,7 @@ impl Connection {
                 .read_buf(&mut self.buffer)
                 .await
                 .expect("Read failed!");
+            println!("Bytes read: {}", bytes_read);
             if bytes_read == 0 {
                 break;
             }
