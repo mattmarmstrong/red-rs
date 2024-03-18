@@ -24,8 +24,9 @@ impl Connection {
     }
 
     pub fn read(&mut self) -> R<()> {
+        let mut stream = self.stream.try_clone().unwrap();
         loop {
-            let bytes_read = self.stream.read(&mut self.buffer).expect("Read failed!");
+            let bytes_read = stream.read(&mut self.buffer).expect("Read failed!");
             if bytes_read == 0 {
                 break;
             }
