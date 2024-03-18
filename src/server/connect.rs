@@ -28,7 +28,7 @@ impl Connection {
             self.stream.readable().await.expect("Stream not readable!");
             match self.stream.try_read_buf(&mut self.buffer) {
                 Ok(0) => break,
-                Ok(n) => println!("Read {} bytes", n),
+                Ok(_) => break,
                 Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
                     continue;
                 }
