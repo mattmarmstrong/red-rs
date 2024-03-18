@@ -1,4 +1,4 @@
-use tokio::net::TcpStream;
+use std::net::TcpStream;
 
 use crate::resp::parse::Parser;
 
@@ -20,15 +20,13 @@ fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
         Err(ReplError::InvalidResponse)
     }
 }
-pub async fn do_repl_handshake(server: &Server) -> R<()> {
+pub fn do_repl_handshake(server: &Server) -> R<()> {
     // TODO -> The rest of the repl_handshake
-    let stream = TcpStream::connect(server.master_addr().unwrap())
-        .await
-        .expect("Failed to connect!");
+    let stream = TcpStream::connect(server.master_addr().unwrap()).unwrap();
     let mut connect = Connection::new(stream);
     let ping = Serializer::to_arr(Vec::from(["ping"]));
-    connect.write(ping).await.expect("Write failed!");
-    connect.read().await.expect("Read failed!");
+    connect.write(ping).expect("Write failed!");
+    connect.read().expect("Read failed!");
     expected_response("ping", &mut connect.buffer)?;
     connect.buf_clear().unwrap();
     let listen = Serializer::to_arr(Vec::from([
@@ -36,13 +34,13 @@ pub async fn do_repl_handshake(server: &Server) -> R<()> {
         "listening-port",
         &server.port.to_string(),
     ]));
-    connect.write(listen).await.expect("Write failed!");
-    connect.read().await.expect("Read failed!");
+    connect.write(listen).expect("Write failed!");
+    connect.read().expect("Read failed!");
     expected_response("ok", &mut connect.buffer)?;
     connect.buf_clear().unwrap();
     let psync = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
-    connect.write(psync).await.expect("Write failed!");
-    connect.read().await.expect("Read failed!");
+    connect.write(psync).expect("Write failed!");
+    connect.read().expect("Read failed!");
     expected_response("ok", &mut connect.buffer)?;
     connect.buf_clear().unwrap();
     Ok(())

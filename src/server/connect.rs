@@ -1,6 +1,6 @@
 use bytes::BytesMut;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use std::io::{Read, Write};
+use std::net::TcpStream;
 
 type R<T> = anyhow::Result<T>;
 
@@ -23,13 +23,9 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn read(&mut self) -> R<()> {
+    pub fn read(&mut self) -> R<()> {
         loop {
-            let bytes_read = self
-                .stream
-                .read_buf(&mut self.buffer)
-                .await
-                .expect("Read failed!");
+            let bytes_read = self.stream.read(&mut self.buffer).expect("Read failed!");
             if bytes_read == 0 {
                 break;
             }
@@ -38,13 +34,10 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn write(&mut self, msg: String) -> R<()> {
+    pub fn write(&mut self, msg: String) -> R<()> {
         println!("WRITING! MSG: {}", msg);
-        self.stream
-            .write_all(msg.as_bytes())
-            .await
-            .expect("Write failed!");
-        self.stream.flush().await.expect("Flush failed!");
+        self.stream.write(msg.as_bytes()).expect("Write failed!");
+        self.stream.flush().expect("Flush failed!");
         Ok(())
     }
 }
