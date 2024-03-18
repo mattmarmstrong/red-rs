@@ -30,7 +30,7 @@ impl Connection {
         loop {
             let bytes_read = self
                 .stream
-                .read_buf(&mut self.buffer)
+                .read(&mut self.buffer)
                 .await
                 .expect("Read failed!");
             println!("Bytes read: {}", bytes_read);
