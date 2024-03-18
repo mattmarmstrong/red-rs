@@ -35,6 +35,7 @@ impl Connection {
                 Err(_) => panic!("read failed"),
             }
         }
+        println!("We broke out the loop!");
         Ok(&mut self.buffer)
     }
 
