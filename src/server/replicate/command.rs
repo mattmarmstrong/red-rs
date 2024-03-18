@@ -28,7 +28,6 @@ pub fn do_repl_handshake(server: &Server) -> R<()> {
     connect.write(ping).expect("Write failed!");
     connect.read().expect("Read failed!");
     expected_response("ping", &mut connect.buffer)?;
-    connect.buf_clear().unwrap();
     let listen = Serializer::to_arr(Vec::from([
         "REPLCONF",
         "listening-port",
@@ -37,11 +36,9 @@ pub fn do_repl_handshake(server: &Server) -> R<()> {
     connect.write(listen).expect("Write failed!");
     connect.read().expect("Read failed!");
     expected_response("ok", &mut connect.buffer)?;
-    connect.buf_clear().unwrap();
     let psync = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
     connect.write(psync).expect("Write failed!");
     connect.read().expect("Read failed!");
     expected_response("ok", &mut connect.buffer)?;
-    connect.buf_clear().unwrap();
     Ok(())
 }
