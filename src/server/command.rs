@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_get_and_set() {
-        let server = Server::default(8000);
+        let server = Server::master(8000);
         let mut args = VecDeque::with_capacity(4);
         args.push_back("test".to_string());
         args.push_back("val".to_string());

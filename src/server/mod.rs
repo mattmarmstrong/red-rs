@@ -43,7 +43,7 @@ impl Server {
         }
     }
 
-    pub fn default(port: u16) -> Self {
+    pub fn master(port: u16) -> Self {
         Self::new(port, None, None, Store::new(), ReplicaInfo::default())
     }
 
@@ -81,7 +81,7 @@ pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Ar
             };
             Arc::new(Server::replica(port, master_ip, master_port))
         }
-        None => Arc::new(Server::default(port)),
+        None => Arc::new(Server::master(port)),
     }
 }
 
