@@ -1,4 +1,4 @@
-use std::net::TcpStream;
+use tokio::net::TcpStream;
 
 use crate::resp::parse::Parser;
 
@@ -20,25 +20,42 @@ fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
         Err(ReplError::InvalidResponse)
     }
 }
-pub fn do_repl_handshake(server: &Server) -> R<()> {
-    // TODO -> The rest of the repl_handshake
-    let stream = TcpStream::connect(server.master_addr().unwrap()).unwrap();
-    let mut connect = Connection::new(stream);
+
+async fn do_follower_ping(c: &mut Connection) -> R<()> {
     let ping = Serializer::to_arr(Vec::from(["ping"]));
-    connect.write(ping).expect("Write failed!");
-    connect.read().expect("Read failed!");
-    expected_response("ping", &mut connect.buffer)?;
+    c.write(ping).await.expect("Write failed!");
+    let ping_resp = c.read().await.expect("Read failed!");
+    expected_response("ping", ping_resp.unwrap())
+}
+
+async fn do_follower_listen(c: &mut Connection, server: &Server) -> R<()> {
     let listen = Serializer::to_arr(Vec::from([
         "REPLCONF",
         "listening-port",
         &server.port.to_string(),
     ]));
-    connect.write(listen).expect("Write failed!");
-    connect.read().expect("Read failed!");
-    expected_response("ok", &mut connect.buffer)?;
+    c.write(listen).await.expect("Write failed!");
+    let listen_resp = c.read().await.expect("Read failed!");
+    expected_response("ok", listen_resp.unwrap())
+}
+async fn do_follower_psync(c: &mut Connection) -> R<()> {
     let psync = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
-    connect.write(psync).expect("Write failed!");
-    connect.read().expect("Read failed!");
-    expected_response("ok", &mut connect.buffer)?;
+    c.write(psync).await.expect("Write failed!");
+    let listen_resp = c.read().await.expect("Read failed!");
+    expected_response("ok", listen_resp.unwrap())
+}
+
+pub async fn do_repl_handshake(server: &Server) -> R<()> {
+    // TODO -> The rest of the repl_handshake
+    let stream = TcpStream::connect(server.master_addr().unwrap())
+        .await
+        .expect("Failed to connect!");
+    let mut connect = Connection::new(stream);
+    do_follower_ping(&mut connect).await?;
+    connect.buf_clear().unwrap();
+    do_follower_listen(&mut connect, server).await?;
+    connect.buf_clear().unwrap();
+    do_follower_psync(&mut connect).await?;
+    connect.buf_clear().unwrap();
     Ok(())
 }

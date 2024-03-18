@@ -27,7 +27,7 @@ async fn main() {
     if server.replica_info.role == Role::Slave {
         let s_clone = Arc::clone(&server);
         tokio::spawn(async move {
-            do_repl_handshake(&s_clone).unwrap_or(());
+            do_repl_handshake(&s_clone).await.unwrap_or(());
         });
     }
     // TODO -> un-hardcode localhost
