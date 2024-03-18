@@ -29,7 +29,10 @@ impl Connection {
             match self.stream.try_read_buf(&mut self.buffer) {
                 Ok(0) => break,
                 Ok(n) => println!("Read {} bytes", n),
-                Err(e) => println!("Something very bad happened! {}", e),
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(_) => panic!("read failed"),
             }
         }
         Ok(&mut self.buffer)
