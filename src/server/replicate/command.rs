@@ -12,7 +12,6 @@ async fn do_follower_ping(c: &mut Connection) -> R<()> {
     let ping = Serializer::to_arr(Vec::from(["ping"]));
     c.write(ping).await.expect("Write failed!");
     let ping_resp = c.read().await.expect("Read failed!");
-    println!("{:#?}", ping_resp);
     assert!(ping_resp.unwrap().cmp_str("pong"));
     Ok(())
 }
@@ -43,7 +42,7 @@ pub async fn do_repl_handshake(server: &Server) -> R<()> {
         .expect("Failed to connect!");
     let mut connect = Connection::new(stream);
     do_follower_ping(&mut connect).await?;
-    // do_follower_listen(&mut connect, server).await?;
-    // do_follower_psync(&mut connect).await?;
+    do_follower_listen(&mut connect, server).await?;
+    do_follower_psync(&mut connect).await?;
     Ok(())
 }
