@@ -5,8 +5,8 @@ use tokio::net::TcpStream;
 type R<T> = anyhow::Result<T>;
 
 pub struct Connection {
-    stream: TcpStream,
-    buffer: BytesMut,
+    pub stream: TcpStream,
+    pub buffer: BytesMut,
 }
 
 impl Connection {
@@ -23,15 +23,19 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn read(&mut self) -> R<&mut BytesMut> {
-        let bytes_read = self
-            .stream
-            .read_buf(&mut self.buffer)
-            .await
-            .expect("Read failed!");
-        println!("bytes_read: {}", bytes_read);
+    pub async fn read(&mut self) -> R<()> {
+        loop {
+            let bytes_read = self
+                .stream
+                .read_buf(&mut self.buffer)
+                .await
+                .expect("Read failed!");
+            if bytes_read == 0 {
+                break;
+            }
+        }
 
-        Ok(&mut self.buffer)
+        Ok(())
     }
 
     pub async fn write(&mut self, msg: String) -> R<()> {

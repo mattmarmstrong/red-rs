@@ -24,8 +24,8 @@ fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
 async fn do_follower_ping(c: &mut Connection) -> R<()> {
     let ping = Serializer::to_arr(Vec::from(["ping"]));
     c.write(ping).await.expect("Write failed!");
-    let ping_resp = c.read().await.expect("Read failed!");
-    expected_response("ping", ping_resp)
+    c.read().await.expect("Read failed!");
+    expected_response("ping", &mut c.buffer)
 }
 
 async fn do_follower_listen(c: &mut Connection, server: &Server) -> R<()> {
@@ -35,14 +35,14 @@ async fn do_follower_listen(c: &mut Connection, server: &Server) -> R<()> {
         &server.port.to_string(),
     ]));
     c.write(listen).await.expect("Write failed!");
-    let listen_resp = c.read().await.expect("Read failed!");
-    expected_response("ok", listen_resp)
+    c.read().await.expect("Read failed!");
+    expected_response("ok", &mut c.buffer)
 }
 async fn do_follower_psync(c: &mut Connection) -> R<()> {
     let psync = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
     c.write(psync).await.expect("Write failed!");
-    let listen_resp = c.read().await.expect("Read failed!");
-    expected_response("ok", listen_resp)
+    c.read().await.expect("Read failed!");
+    expected_response("ok", &mut c.buffer)
 }
 
 pub async fn do_repl_handshake(server: &Server) -> R<()> {
