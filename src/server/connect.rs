@@ -2,6 +2,9 @@ use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+use crate::resp::data::DataType;
+use crate::resp::parse::Parser;
+
 type R<T> = anyhow::Result<T>;
 
 pub struct Connection {
@@ -23,16 +26,21 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn read(&mut self) -> R<Option<&mut BytesMut>> {
-        match self.stream.read(&mut self.buffer).await {
-            Ok(n) => {
-                if n == 0 {
-                    return Ok(None);
-                };
-                Ok(Some(&mut self.buffer))
+    pub async fn read(&mut self) -> R<Option<DataType>> {
+        loop {
+            let bytes_read = self
+                .stream
+                .read_buf(&mut self.buffer)
+                .await
+                .expect("Read failed!");
+            if bytes_read == 0 {
+                break;
             }
-            Err(_) => panic!("Fix me!"),
         }
+
+        let parsed_data = Parser::new(&mut self.buffer).parse().ok();
+        self.buf_clear().unwrap();
+        Ok(parsed_data)
     }
 
     pub async fn write(&mut self, msg: String) -> R<()> {
