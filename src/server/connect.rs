@@ -24,17 +24,12 @@ impl Connection {
     }
 
     pub async fn read(&mut self) -> R<&mut BytesMut> {
-        println!("READING!");
         loop {
-            println!("LOOPING");
             self.stream.readable().await.expect("Stream not readable!");
-            let bytes_read = self
-                .stream
-                .read_buf(&mut self.buffer)
-                .await
-                .expect("Read failed!");
-            if bytes_read == 0 {
-                break;
+            match self.stream.try_read_buf(&mut self.buffer) {
+                Ok(0) => break,
+                Ok(n) => println!("Read {} bytes", n),
+                Err(e) => println!("Something very bad happened! {}", e),
             }
         }
         Ok(&mut self.buffer)
