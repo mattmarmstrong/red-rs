@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 type R<T> = anyhow::Result<T>;
@@ -25,17 +25,17 @@ impl Connection {
 
     pub async fn read(&mut self) -> R<&mut BytesMut> {
         loop {
-            self.stream.readable().await.expect("Stream not readable!");
-            match self.stream.try_read_buf(&mut self.buffer) {
-                Ok(0) => break,
-                Ok(_) => break,
-                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
-                    continue;
-                }
-                Err(_) => panic!("read failed"),
+            let bytes_read = self
+                .stream
+                .read_buf(&mut self.buffer)
+                .await
+                .expect("Read failed!");
+            println!("bytes_read: {}", bytes_read);
+            if bytes_read == 0 {
+                break;
             }
         }
-        println!("We broke out the loop!");
+
         Ok(&mut self.buffer)
     }
 
