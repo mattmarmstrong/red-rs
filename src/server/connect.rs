@@ -1,4 +1,3 @@
-use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -9,38 +8,24 @@ type R<T> = anyhow::Result<T>;
 
 pub struct Connection {
     stream: TcpStream,
-    buffer: BytesMut,
 }
 
 impl Connection {
     pub fn new(stream: TcpStream) -> Self {
-        Self {
-            stream,
-            buffer: BytesMut::with_capacity(4096),
-        }
-    }
-
-    #[inline]
-    pub fn buf_clear(&mut self) -> R<()> {
-        self.buffer.clear();
-        Ok(())
+        Self { stream }
     }
 
     pub async fn read(&mut self) -> R<Option<DataType>> {
+        let mut buffer = [0u8; 1024];
         loop {
-            let bytes_read = self
-                .stream
-                .read(&mut self.buffer)
-                .await
-                .expect("Read failed!");
+            let bytes_read = self.stream.read(&mut buffer).await.expect("Read failed!");
             println!("Bytes read: {}", bytes_read);
             if bytes_read == 0 {
                 break;
             }
         }
 
-        let parsed_data = Parser::new(&mut self.buffer).parse().ok();
-        self.buf_clear().unwrap();
+        let parsed_data = Parser::new(&mut buffer).parse().ok();
         Ok(parsed_data)
     }
 
