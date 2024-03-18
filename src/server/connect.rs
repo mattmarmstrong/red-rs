@@ -25,6 +25,7 @@ impl Connection {
 
     pub async fn read(&mut self) -> R<&mut BytesMut> {
         loop {
+            self.stream.readable().await.expect("Stream not readable!");
             let bytes_read = self
                 .stream
                 .read_buf(&mut self.buffer)
