@@ -3,7 +3,7 @@ use tokio::net::TcpStream;
 use crate::resp::parse::Parser;
 
 use crate::resp::serialize::Serializer;
-use crate::server::connection::Connection;
+use crate::server::connect::Connection;
 use crate::server::Server;
 
 use super::errors::ReplError;
@@ -23,9 +23,9 @@ fn expected_response(expected: &str, actual: &[u8]) -> R<()> {
 
 async fn do_follower_ping(c: &mut Connection) -> R<()> {
     let ping = Serializer::to_arr(Vec::from(["ping"]));
-    c.write(ping).await.unwrap();
+    c.write(ping).await;
     let ping_resp = c.read().await.expect("Read failed!");
-    expected_response("ping", &ping_resp)
+    expected_response("ping", ping_resp)
 }
 
 async fn do_follower_listen(c: &mut Connection, server: &Server) -> R<()> {
@@ -34,15 +34,15 @@ async fn do_follower_listen(c: &mut Connection, server: &Server) -> R<()> {
         "listening-port",
         &server.port.to_string(),
     ]));
-    c.write(listen).await.unwrap();
+    c.write(listen).await;
     let listen_resp = c.read().await.expect("Read failed!");
-    expected_response("ok", &listen_resp)
+    expected_response("ok", listen_resp)
 }
 async fn do_follower_psync(c: &mut Connection) -> R<()> {
     let psync = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
-    c.write(psync).await.unwrap();
+    c.write(psync).await;
     let listen_resp = c.read().await.expect("Read failed!");
-    expected_response("ok", &listen_resp)
+    expected_response("ok", listen_resp)
 }
 
 pub async fn do_repl_handshake(server: &Server) -> R<()> {

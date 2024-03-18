@@ -2,9 +2,6 @@ use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::resp::data::DataType;
-use crate::resp::parse::Parser;
-
 type R<T> = anyhow::Result<T>;
 
 pub struct Connection {
@@ -47,5 +44,9 @@ impl Connection {
             .expect("Write failed!");
         self.stream.flush().await.expect("Flush failed!");
         Ok(())
+    }
+
+    pub async fn resp(&mut self) {
+        self.stream.next()
     }
 }

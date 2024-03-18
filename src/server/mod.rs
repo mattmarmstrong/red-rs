@@ -1,5 +1,5 @@
 pub mod command;
-pub mod connection;
+pub mod connect;
 pub mod errors;
 pub mod replicate;
 pub mod store;
@@ -48,15 +48,14 @@ impl Server {
     }
 
     pub fn replica(port: u16, master_ip: Ipv4Addr, master_port: u16) -> Self {
-        let replica = Self::new(
+        // TODO -> replication start-up steps here
+        Self::new(
             port,
             Some(master_ip),
             Some(master_port),
             Store::new(),
             ReplicaInfo::fake_replica(), // TODO -> real
-        );
-        // TODO -> replication start-up steps here
-        replica
+        )
     }
 
     pub fn master_addr(&self) -> Option<SocketAddrV4> {
