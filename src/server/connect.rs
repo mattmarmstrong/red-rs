@@ -20,7 +20,7 @@ impl Connection {
         loop {
             let bytes_read = self.stream.read(&mut buffer).await.expect("Read failed!");
             println!("Bytes read: {}", bytes_read);
-            if bytes_read == 0 {
+            if bytes_read != 0 {
                 break;
             }
         }
