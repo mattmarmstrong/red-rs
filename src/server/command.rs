@@ -97,12 +97,21 @@ lazy_static! {
         let set_entry = CommandEntry::new(2, Some(set_options));
         commands.insert("set".to_string(), set_entry);
 
-        //Command - info
+        // Command - info
         let mut info_options = HashSet::new();
         let repl_entry = OptionEntry::new("replication".to_string(), None);
         info_options.insert(repl_entry);
         let info_entry = CommandEntry::new(1, Some(info_options));
         commands.insert("info".to_string(), info_entry);
+
+        // Command - replconf
+        let mut repl_conf_options = HashSet::new();
+        let listen_entry = OptionEntry::new("listening-port".to_string(), Some(1));
+        let capa_entry = OptionEntry::new("capa".to_string(), Some(1));
+        repl_conf_options.insert(listen_entry);
+        repl_conf_options.insert(capa_entry);
+        let repl_conf_entry = CommandEntry::new(1, Some(repl_conf_options));
+        commands.insert("replconf".to_string(), repl_conf_entry);
 
         // Commands
         commands
@@ -135,6 +144,10 @@ pub enum Command {
         px: Option<Duration>,
     },
     Info(String),
+    REPLConf {
+        port: Option<u16>,
+        capa: Option<String>,
+    },
 }
 
 impl Command {
@@ -221,6 +234,24 @@ impl Command {
         Ok(Self::Info(option.name))
     }
 
+    fn repl_conf(args: Vec<String>) -> R<Self> {
+        let mut options = Command::parse_options("replconf", args)?;
+        let mut port: Option<u16> = None;
+        let mut capa: Option<String> = None;
+        debug_assert!(options.len() == 1);
+        let opt = options.pop_front().unwrap();
+        match opt.name.as_str() {
+            "listening-port" => {
+                port = opt.val.unwrap().pop_front().unwrap().parse::<u16>().ok();
+            }
+            "capa" => {
+                capa = opt.val.unwrap().pop_front();
+            }
+            _ => return Err(CommandError::InvalidArgs),
+        }
+        Ok(Self::REPLConf { port, capa })
+    }
+
     #[inline]
     fn do_ping() -> String {
         "+PONG\r\n".to_string()
@@ -257,6 +288,10 @@ impl Command {
         }
     }
 
+    fn do_repl_conf() -> String {
+        Serializer::to_simple_str("OK")
+    }
+
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
         match str {
             // No args commands
@@ -269,6 +304,7 @@ impl Command {
                     "get" => Command::get(args),
                     "set" => Command::set(args),
                     "info" => Command::info(args),
+                    "replconf" => Command::repl_conf(args),
                     _ => Err(CommandError::NotFound),
                 }
             }
@@ -321,6 +357,7 @@ impl Command {
             Self::Get(key) => Command::do_get(key, server),
             Self::Set { key, val, px } => Command::do_set(key, val, px, server),
             Self::Info(v) => Command::do_info(v.as_str(), server),
+            Self::REPLConf { port, capa } => Command::do_repl_conf(),
         };
         stream.write_all(resp.as_bytes()).await?;
         Ok(())

@@ -33,16 +33,16 @@ impl Role {
 pub struct ReplicaInfo {
     pub role: Role,
     pub connected_slaves: usize,
-    pub master_replid: String,
-    pub master_repl_offset: usize,
+    pub master_replid: Option<String>,
+    pub master_repl_offset: isize,
 }
 
 impl ReplicaInfo {
     pub fn new(
         role: Role,
         connected_slaves: usize,
-        master_replid: String,
-        master_repl_offset: usize,
+        master_replid: Option<String>,
+        master_repl_offset: isize,
     ) -> Self {
         Self {
             role,
@@ -53,22 +53,20 @@ impl ReplicaInfo {
     }
 
     pub fn default() -> Self {
-        Self::new(Role::Master, 0, gen_master_replid(), 0)
+        Self::new(Role::Master, 0, Some(gen_master_replid()), 0)
     }
 
-    // fake it till you make it
-    pub fn fake_replica() -> Self {
-        Self::new(Role::Slave, 0, gen_master_replid(), 0)
-    }
-
-    pub fn replica(master_replid: String, master_repl_offset: usize) -> Self {
-        Self::new(Role::Slave, 0, master_replid, master_repl_offset)
+    pub fn replica() -> Self {
+        Self::new(Role::Slave, 0, None, -1)
     }
 
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         let role = format("role", self.role.to_str());
-        let master_replid = format("master_replid", &self.master_replid);
+        let master_replid = format(
+            "master_replid",
+            &self.master_replid.as_ref().unwrap_or(&"?".to_string()),
+        );
         let master_repl_offset = format("master_repl_offset", &self.master_repl_offset.to_string());
         [&role, "\r\n", &master_replid, "\r\n", &master_repl_offset].concat()
     }

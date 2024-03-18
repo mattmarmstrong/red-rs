@@ -54,7 +54,7 @@ impl Server {
             Some(master_ip),
             Some(master_port),
             Store::new(),
-            ReplicaInfo::fake_replica(), // TODO -> real
+            ReplicaInfo::replica(), // TODO -> real
         )
     }
 
