@@ -113,6 +113,11 @@ lazy_static! {
         let repl_conf_entry = CommandEntry::new(1, Some(repl_conf_options));
         commands.insert("replconf".to_string(), repl_conf_entry);
 
+        // Command - psync
+        let psync_options = HashSet::new();
+        let psync_entry = CommandEntry::new(2, Some(psync_options));
+        commands.insert("psync".to_string(), psync_entry);
+
         // Commands
         commands
     };
@@ -136,6 +141,7 @@ impl CommandOption {
 #[derive(Debug)]
 pub enum Command {
     PING,
+    PSync(String, isize),
     Echo(String),
     Get(String),
     Set {
@@ -144,7 +150,7 @@ pub enum Command {
         px: Option<Duration>,
     },
     Info(String),
-    REPLConf {
+    ReplConf {
         port: Option<u16>,
         capa: Option<String>,
     },
@@ -247,9 +253,24 @@ impl Command {
             "capa" => {
                 capa = opt.val.unwrap().pop_front();
             }
-            _ => return Err(CommandError::InvalidArgs),
+            _ => return Err(CommandError::InvalidOption),
         }
-        Ok(Self::REPLConf { port, capa })
+        Ok(Self::ReplConf { port, capa })
+    }
+
+    fn psync(mut args: Vec<String>) -> R<Self> {
+        let repl_id = args.pop_front();
+        let offset = args.pop_front();
+        match (repl_id, offset) {
+            (Some(id), Some(offset)) => {
+                if let Ok(o) = offset.parse::<isize>() {
+                    Ok(Self::PSync(id, o))
+                } else {
+                    Err(CommandError::InvalidArgs)
+                }
+            }
+            _ => Err(CommandError::InvalidArgs),
+        }
     }
 
     #[inline]
@@ -292,6 +313,17 @@ impl Command {
         Serializer::to_simple_str("OK")
     }
 
+    fn do_psync(repl_id: String, server: &Server) -> String {
+        let master_replid = server.replica_info.master_replid.as_ref().unwrap();
+        let master_repl_offset = server.replica_info.master_repl_offset.to_string();
+        let repl_command = match repl_id.as_str() {
+            "?" => "FULLRESYNC",
+            _ => unimplemented!(),
+        };
+        let command_str = [repl_command, " ", &master_replid, " ", &master_repl_offset].concat();
+        Serializer::to_simple_str(&command_str)
+    }
+
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
         match str {
             // No args commands
@@ -305,6 +337,7 @@ impl Command {
                     "set" => Command::set(args),
                     "info" => Command::info(args),
                     "replconf" => Command::repl_conf(args),
+                    "psync" => Command::psync(args),
                     _ => Err(CommandError::NotFound),
                 }
             }
@@ -357,7 +390,8 @@ impl Command {
             Self::Get(key) => Command::do_get(key, server),
             Self::Set { key, val, px } => Command::do_set(key, val, px, server),
             Self::Info(v) => Command::do_info(v.as_str(), server),
-            Self::REPLConf { port, capa } => Command::do_repl_conf(),
+            Self::ReplConf { port: _, capa: _ } => Command::do_repl_conf(),
+            Self::PSync(repl_id, _) => Command::do_psync(repl_id, server),
         };
         stream.write_all(resp.as_bytes()).await?;
         Ok(())
