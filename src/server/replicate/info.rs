@@ -52,7 +52,7 @@ impl ReplicaInfo {
         }
     }
 
-    pub fn default() -> Self {
+    pub fn master() -> Self {
         Self::new(Role::Master, 0, Some(gen_master_replid()), 0)
     }
 
@@ -65,7 +65,7 @@ impl ReplicaInfo {
         let role = format("role", self.role.to_str());
         let master_replid = format(
             "master_replid",
-            &self.master_replid.as_ref().unwrap_or(&"?".to_string()),
+            self.master_replid.as_ref().unwrap_or(&"?".to_string()),
         );
         let master_repl_offset = format("master_repl_offset", &self.master_repl_offset.to_string());
         [&role, "\r\n", &master_replid, "\r\n", &master_repl_offset].concat()

@@ -99,11 +99,16 @@ impl<'data> Parser<'data> {
                     if !self.at_end() {
                         buffer.push(self.read_byte().to_ascii_lowercase() as char);
                     } else {
-                        return Err(RESPError::InvalidData);
+                        break;
                     }
                 }
-                self.skip_crlf()?;
-                Ok(DataType::BulkString(buffer))
+                if self.at_end() {
+                    buffer.push(self.read_byte().to_ascii_lowercase() as char);
+                    Ok(DataType::StoreFile(buffer))
+                } else {
+                    self.skip_crlf()?;
+                    Ok(DataType::BulkString(buffer))
+                }
             }
             false => Ok(DataType::BulkString(String::new())),
         }
@@ -238,5 +243,14 @@ mod tests {
         let data = b"$1A5\rtest\n";
         let mut parser = Parser::new(data);
         assert!(parser.parse_len().is_err())
+    }
+
+    #[test]
+    fn test_bulk_str_parse_without_end_crlf_returns_store_file() {
+        let data = b"$16\r\nstorefilecontent";
+        let mut parser = Parser::new(data);
+        let expected = DataType::StoreFile("storefilecontent".to_string());
+        let actual = parser.parse().unwrap();
+        assert_eq!(expected, actual)
     }
 }

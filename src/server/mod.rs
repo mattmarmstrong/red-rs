@@ -44,7 +44,7 @@ impl Server {
     }
 
     pub fn master(port: u16) -> Self {
-        Self::new(port, None, None, Store::new(), ReplicaInfo::default())
+        Self::new(port, None, None, Store::new(), ReplicaInfo::master())
     }
 
     pub fn replica(port: u16, master_ip: Ipv4Addr, master_port: u16) -> Self {

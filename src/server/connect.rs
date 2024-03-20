@@ -6,6 +6,10 @@ use crate::resp::parse::Parser;
 
 type R<T> = anyhow::Result<T>;
 
+pub async fn read_exact(_stream: &mut TcpStream) -> R<Option<DataType>> {
+    todo!()
+}
+
 pub async fn read(stream: &mut TcpStream) -> R<Option<DataType>> {
     let mut buffer = [0u8; 1024];
     loop {
@@ -15,7 +19,7 @@ pub async fn read(stream: &mut TcpStream) -> R<Option<DataType>> {
         }
     }
 
-    let parsed_data = Parser::new(&mut buffer).parse().ok();
+    let parsed_data = Parser::new(&buffer).parse().ok();
     Ok(parsed_data)
 }
 

@@ -11,6 +11,7 @@ pub enum DataType {
     BulkString(String),
     BulkError(String),
     Array(Vec<DataType>),
+    StoreFile(String),
 }
 
 impl DataType {

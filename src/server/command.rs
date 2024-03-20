@@ -1,6 +1,5 @@
-// This file is intended to include all server <-> client commands
-// Other commands like master <-> slave commands should exist elsewhere.
-// Those commands may get called in those contexts
+// This file is intended to include leader -> follower commands
+// The follower -> leader commands should be in server/replicate
 
 use std::borrow::Borrow;
 use std::collections::VecDeque;
@@ -313,7 +312,8 @@ impl Command {
         Serializer::to_simple_str("OK")
     }
 
-    fn do_psync(repl_id: String, server: &Server) -> String {
+    // the return value of this fn is proof I should refactor these commands.
+    async fn do_psync(repl_id: String, server: &Server, stream: &mut TcpStream) -> String {
         let master_replid = server.replica_info.master_replid.as_ref().unwrap();
         let master_repl_offset = server.replica_info.master_repl_offset.to_string();
         let repl_command = match repl_id.as_str() {
@@ -321,7 +321,17 @@ impl Command {
             _ => unimplemented!(),
         };
         let command_str = [repl_command, " ", &master_replid, " ", &master_repl_offset].concat();
-        Serializer::to_simple_str(&command_str)
+        let resync = Serializer::to_simple_str(&command_str);
+        stream
+            .write_all(resync.as_bytes())
+            .await
+            .expect("Failed to write!");
+        let store_file = Serializer::to_store_file(b"524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2");
+        stream
+            .write_all(store_file.as_slice())
+            .await
+            .expect("Failed to write!");
+        String::new()
     }
 
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
@@ -391,9 +401,11 @@ impl Command {
             Self::Set { key, val, px } => Command::do_set(key, val, px, server),
             Self::Info(v) => Command::do_info(v.as_str(), server),
             Self::ReplConf { port: _, capa: _ } => Command::do_repl_conf(),
-            Self::PSync(repl_id, _) => Command::do_psync(repl_id, server),
+            Self::PSync(repl_id, _) => Command::do_psync(repl_id, server, stream).await,
         };
-        stream.write_all(resp.as_bytes()).await?;
+        if !resp.is_empty() {
+            stream.write_all(resp.as_bytes()).await?;
+        }
         Ok(())
     }
 }

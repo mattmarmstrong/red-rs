@@ -27,11 +27,19 @@ async fn do_follower_listen(s: &mut TcpStream, server: &Server) -> R<()> {
     assert!(listen_resp.unwrap().cmp_str("ok"));
     Ok(())
 }
+
 async fn do_follower_capa(s: &mut TcpStream) -> R<()> {
     let capa = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
     write(s, capa).await.expect("Write failed!");
     let capa_resp = read(s).await.expect("Read failed!");
     assert!(capa_resp.unwrap().cmp_str("ok"));
+    Ok(())
+}
+
+async fn do_follower_psync(s: &mut TcpStream, _server: &Server) -> R<()> {
+    let psync = Serializer::to_arr(Vec::from(["PSYNC", "?", "-1"]));
+    write(s, psync).await.expect("Write failed!");
+    let _psync_resp = read(s).await.expect("Read failed!");
     Ok(())
 }
 
@@ -43,13 +51,6 @@ pub async fn do_repl_handshake(server: &Server) -> R<()> {
     do_follower_ping(&mut stream).await?;
     do_follower_listen(&mut stream, server).await?;
     do_follower_capa(&mut stream).await?;
-    do_psync(&mut stream, server).await?;
-    Ok(())
-}
-
-async fn do_psync(s: &mut TcpStream, _server: &Server) -> R<()> {
-    let psync = Serializer::to_arr(Vec::from(["PSYNC", "?", "-1"]));
-    write(s, psync).await.expect("Write failed!");
-    let _psync_resp = read(s).await.expect("Read failed!");
+    do_follower_psync(&mut stream, server).await?;
     Ok(())
 }
