@@ -20,17 +20,18 @@ impl Serializer {
         buffer
     }
 
-    pub fn to_store_file(hex: &[u8]) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(4096);
-        buffer.push(b'$');
-        hex.len()
+    pub fn store_file(bytes: Vec<u8>) -> Vec<u8> {
+        let mut prefix = Vec::with_capacity(16);
+        prefix.push(b'$');
+        bytes
+            .len()
             .to_ne_bytes()
             .iter()
-            .for_each(|byte| buffer.push(*byte));
-        buffer.push(b'\r');
-        buffer.push(b'\n');
-        hex.iter().for_each(|byte| buffer.push(*byte));
-        buffer
+            .for_each(|byte| prefix.push(*byte));
+        prefix.push(b'\r');
+        prefix.push(b'\n');
+        prefix.extend(bytes);
+        prefix
     }
 }
 

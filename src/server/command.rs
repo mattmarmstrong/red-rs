@@ -14,6 +14,7 @@ use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
 
 use super::errors::CommandError;
+use super::store::file::empty_store_file_bytes;
 use super::Server;
 
 #[derive(Debug, Eq)]
@@ -326,7 +327,7 @@ impl Command {
             .write_all(resync.as_bytes())
             .await
             .expect("Failed to write!");
-        let store_file = Serializer::to_store_file(b"524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2");
+        let store_file = Serializer::store_file(empty_store_file_bytes());
         stream
             .write_all(store_file.as_slice())
             .await

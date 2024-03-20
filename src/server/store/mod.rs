@@ -5,6 +5,8 @@ use hashbrown::HashMap;
 
 use super::errors::StoreError;
 
+pub mod file;
+
 type R<T> = anyhow::Result<T, StoreError>;
 
 #[derive(Debug)]
