@@ -13,14 +13,17 @@ pub async fn read_exact(_stream: &mut TcpStream) -> R<Option<DataType>> {
 pub async fn read(stream: &mut TcpStream) -> R<Option<DataType>> {
     let mut buffer = [0u8; 1024];
     loop {
-        let bytes_read = stream.read(&mut buffer).await.expect("Read failed!");
-        if bytes_read != 0 {
-            break;
+        match stream.read(&mut buffer).await {
+            Err(_) => panic!("Read failed!"),
+            Ok(bytes_read) => {
+                if bytes_read == 0 {
+                    break;
+                }
+            }
         }
     }
-
     let parsed_data = Parser::new(&buffer).parse().ok();
-    Ok(parsed_data)
+    return Ok(parsed_data);
 }
 
 pub async fn write(stream: &mut TcpStream, msg: String) -> R<()> {
