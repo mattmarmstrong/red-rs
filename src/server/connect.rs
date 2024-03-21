@@ -20,6 +20,7 @@ pub async fn expect_resp(stream: &mut TcpStream, expected: &str) -> R<()> {
                     break;
                 }
                 let resp = Parser::new(&buffer).parse().unwrap();
+                println!("{}", resp.try_to_string().unwrap());
                 assert!(resp.cmp_str(expected))
             }
         }
