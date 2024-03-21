@@ -1,6 +1,5 @@
 // This file is intended to include leader -> follower commands
 // The follower -> leader commands should be in server/replicate
-
 use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};

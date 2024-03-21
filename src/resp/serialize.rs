@@ -20,18 +20,10 @@ impl Serializer {
         buffer
     }
 
-    pub fn store_file(bytes: Vec<u8>) -> Vec<u8> {
-        let mut prefix = Vec::with_capacity(16);
-        prefix.push(b'$');
-        bytes
-            .len()
-            .to_ne_bytes()
-            .iter()
-            .for_each(|byte| prefix.push(*byte));
-        prefix.push(b'\r');
-        prefix.push(b'\n');
-        prefix.extend(bytes);
-        prefix
+    pub fn store_file(mut bytes: Vec<u8>) -> Vec<u8> {
+        let mut buffer = format!("${}\r\n", bytes.len()).as_bytes().to_vec();
+        buffer.append(&mut bytes);
+        buffer
     }
 }
 
