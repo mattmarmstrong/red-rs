@@ -10,20 +10,21 @@ pub async fn read_exact(_stream: &mut TcpStream) -> R<Option<DataType>> {
     todo!()
 }
 
-pub async fn read(stream: &mut TcpStream) -> R<Option<DataType>> {
-    let mut buffer = [0u8; 1024];
+pub async fn expect_resp(stream: &mut TcpStream, expected: &str) -> R<()> {
     loop {
+        let mut buffer = [0u8; 1024];
         match stream.read(&mut buffer).await {
             Err(_) => panic!("Read failed!"),
             Ok(bytes_read) => {
                 if bytes_read == 0 {
                     break;
                 }
+                let resp = Parser::new(&buffer).parse().unwrap();
+                assert!(resp.cmp_str(expected))
             }
         }
     }
-    let parsed_data = Parser::new(&buffer).parse().ok();
-    return Ok(parsed_data);
+    Ok(())
 }
 
 pub async fn write(stream: &mut TcpStream, msg: String) -> R<()> {

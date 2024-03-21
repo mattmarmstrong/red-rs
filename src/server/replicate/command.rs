@@ -1,7 +1,7 @@
 use tokio::net::TcpStream;
 
 use crate::resp::serialize::Serializer;
-use crate::server::connect::{read, write};
+use crate::server::connect::{expect_resp, write};
 use crate::server::Server;
 
 use super::errors::ReplError;
@@ -11,8 +11,7 @@ type R<T> = anyhow::Result<T, ReplError>;
 async fn do_follower_ping(s: &mut TcpStream) -> R<()> {
     let ping = Serializer::to_arr(Vec::from(["ping"]));
     write(s, ping).await.expect("Write failed!");
-    let ping_resp = read(s).await.expect("Read failed!");
-    assert!(ping_resp.unwrap().cmp_str("pong"));
+    expect_resp(s, "ping").await.expect("Read Failed!");
     Ok(())
 }
 
@@ -23,23 +22,21 @@ async fn do_follower_listen(s: &mut TcpStream, server: &Server) -> R<()> {
         &server.port.to_string(),
     ]));
     write(s, listen).await.expect("Write failed!");
-    let listen_resp = read(s).await.expect("Read failed!");
-    assert!(listen_resp.unwrap().cmp_str("ok"));
+    expect_resp(s, "ok").await.expect("Read failed!");
     Ok(())
 }
 
 async fn do_follower_capa(s: &mut TcpStream) -> R<()> {
     let capa = Serializer::to_arr(Vec::from(["REPLCONF", "capa", "psync2"]));
     write(s, capa).await.expect("Write failed!");
-    let capa_resp = read(s).await.expect("Read failed!");
-    assert!(capa_resp.unwrap().cmp_str("ok"));
+    expect_resp(s, "ok").await.expect("Read failed!");
     Ok(())
 }
 
 async fn do_follower_psync(s: &mut TcpStream, _server: &Server) -> R<()> {
     let psync = Serializer::to_arr(Vec::from(["PSYNC", "?", "-1"]));
     write(s, psync).await.expect("Write failed!");
-    let _psync_resp = read(s).await.expect("Read failed!");
+    expect_resp(s, "ok").await.expect("Read failed!");
     Ok(())
 }
 
