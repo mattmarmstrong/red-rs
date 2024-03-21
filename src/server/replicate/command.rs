@@ -11,7 +11,7 @@ type R<T> = anyhow::Result<T, ReplError>;
 async fn do_follower_ping(s: &mut TcpStream) -> R<()> {
     let ping = Serializer::to_arr(Vec::from(["ping"]));
     write(s, ping).await.expect("Write failed!");
-    expect_resp(s, "ping").await.expect("Read Failed!");
+    expect_resp(s, "pong").await.expect("Read Failed!");
     Ok(())
 }
 
