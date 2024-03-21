@@ -21,11 +21,12 @@ pub async fn expect_resp(stream: &mut TcpStream, expected: &str) -> R<()> {
                 }
                 let resp = Parser::new(&buffer).parse().unwrap();
                 println!("{}", resp.try_to_string().unwrap());
-                assert!(resp.cmp_str(expected))
+                assert!(resp.cmp_str(expected));
+                return Ok(());
             }
         }
     }
-    Ok(())
+    unreachable!()
 }
 
 pub async fn write(stream: &mut TcpStream, msg: String) -> R<()> {
