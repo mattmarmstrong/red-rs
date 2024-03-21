@@ -273,47 +273,47 @@ impl Command {
     }
 
     #[inline]
-    fn do_ping() -> String {
-        "+PONG\r\n".to_string()
+    fn do_ping() -> Option<String> {
+        Some("+PONG\r\n".to_string())
     }
 
     #[inline]
-    fn do_echo(arg: &str) -> String {
-        Serializer::to_simple_str(arg)
+    fn do_echo(arg: &str) -> Option<String> {
+        Some(Serializer::to_simple_str(arg))
     }
 
-    fn do_get(key: String, server: &Server) -> String {
+    fn do_get(key: String, server: &Server) -> Option<String> {
         match server.store.try_read(key.to_owned()) {
             Ok(val) => match val {
-                Some(v) => Serializer::to_bulk_str(&v),
-                None => "$-1\r\n".to_string(),
+                Some(v) => Some(Serializer::to_bulk_str(&v)),
+                None => Some("$-1\r\n".to_string()),
             },
             // TODO: handle read errors more gracefully
-            Err(_) => "$-1\r\n".to_string(),
+            Err(_) => Some("$-1\r\n".to_string()),
         }
     }
 
-    fn do_set(key: String, val: String, exp: Option<Duration>, server: &Server) -> String {
+    fn do_set(key: String, val: String, exp: Option<Duration>, server: &Server) -> Option<String> {
         match server.store.try_write(key, val, exp) {
-            Ok(_) => "+OK\r\n".to_string(),
+            Ok(_) => Some("+OK\r\n".to_string()),
             // TODO: error handling
-            Err(_) => "$-1\r\n".to_string(),
+            Err(_) => Some("$-1\r\n".to_string()),
         }
     }
 
-    fn do_info(info_type: &str, server: &Server) -> String {
+    fn do_info(info_type: &str, server: &Server) -> Option<String> {
         match info_type {
-            "replication" => Serializer::to_bulk_str(&server.replica_info.to_string()),
+            "replication" => Some(Serializer::to_bulk_str(&server.replica_info.to_string())),
             _ => todo!(),
         }
     }
 
-    fn do_repl_conf() -> String {
-        Serializer::to_simple_str("OK")
+    fn do_repl_conf() -> Option<String> {
+        Some(Serializer::to_simple_str("OK"))
     }
 
     // the return value of this fn is proof I should refactor these commands.
-    async fn do_psync(repl_id: String, server: &Server, stream: &mut TcpStream) -> String {
+    async fn do_psync(repl_id: String, server: &Server, stream: &mut TcpStream) -> Option<String> {
         let master_replid = server.replica_info.master_replid.as_ref().unwrap();
         let master_repl_offset = server.replica_info.master_repl_offset.to_string();
         let repl_command = match repl_id.as_str() {
@@ -331,7 +331,7 @@ impl Command {
             .write_all(store_file.as_slice())
             .await
             .expect("Failed to write!");
-        String::new()
+        None
     }
 
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
@@ -403,8 +403,8 @@ impl Command {
             Self::ReplConf { port: _, capa: _ } => Command::do_repl_conf(),
             Self::PSync(repl_id, _) => Command::do_psync(repl_id, server, stream).await,
         };
-        if !resp.is_empty() {
-            stream.write_all(resp.as_bytes()).await?;
+        if resp.is_some() {
+            stream.write_all(resp.unwrap().as_bytes()).await?;
         }
         Ok(())
     }
@@ -429,16 +429,16 @@ mod tests {
         args.push_back("px".to_string());
         args.push_back("100".to_string());
         let set = Command::set(args).unwrap();
-        let resp: String;
+        let resp: Option<String>;
         match set {
             Command::Set { key, val, px } => {
                 resp = Command::do_set(key, val, px, &server);
             }
             _ => panic!(),
         }
-        assert_eq!("+OK\r\n".to_string(), resp);
+        assert_eq!("+OK\r\n".to_string(), resp.unwrap());
         sleep(Duration::from_millis(101));
         let get = Command::do_get("test".to_string(), &server);
-        assert_eq!(get, "$-1\r\n".to_string());
+        assert_eq!(get.unwrap(), "$-1\r\n".to_string());
     }
 }
