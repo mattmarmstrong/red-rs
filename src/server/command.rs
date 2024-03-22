@@ -395,7 +395,7 @@ impl Command {
                     s.replicas = Some(vec![repl])
                 }
             }
-            false => todo!(),
+            false => {} // currently not doing anything with psync
         }
         let resp = Serializer::to_simple_str("OK");
         stream
