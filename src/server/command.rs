@@ -3,16 +3,19 @@
 use std::borrow::Borrow;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 use std::time::Duration;
 
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
+use tokio::sync::RwLock;
 use tokio::{io::AsyncWriteExt, net::TcpStream};
 
 use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
 
 use super::errors::CommandError;
+use super::replicate::Replica;
 use super::store::file::empty_store_file_bytes;
 use super::Server;
 
@@ -282,8 +285,9 @@ impl Command {
         Some(Serializer::to_simple_str(arg))
     }
 
-    fn do_get(key: String, server: &Server) -> Option<String> {
-        match server.store.try_read(key.to_owned()) {
+    async fn do_get(key: String, server: &Arc<RwLock<Server>>) -> Option<String> {
+        let s = server.read().await;
+        match s.store.try_read(key.to_owned()) {
             Ok(val) => match val {
                 Some(v) => Some(Serializer::to_bulk_str(&v)),
                 None => Some("$-1\r\n".to_string()),
@@ -293,29 +297,60 @@ impl Command {
         }
     }
 
-    fn do_set(key: String, val: String, exp: Option<Duration>, server: &Server) -> Option<String> {
-        match server.store.try_write(key, val, exp) {
+    async fn do_set(
+        key: String,
+        val: String,
+        exp: Option<Duration>,
+        server: &Arc<RwLock<Server>>,
+    ) -> Option<String> {
+        let s = server.write().await;
+        match s.store.try_write(key, val, exp) {
             Ok(_) => Some("+OK\r\n".to_string()),
             // TODO: error handling
             Err(_) => Some("$-1\r\n".to_string()),
         }
     }
 
-    fn do_info(info_type: &str, server: &Server) -> Option<String> {
+    async fn do_info(info_type: &str, server: &Arc<RwLock<Server>>) -> Option<String> {
+        let s = server.read().await;
         match info_type {
-            "replication" => Some(Serializer::to_bulk_str(&server.replica_info.to_string())),
+            "replication" => Some(Serializer::to_bulk_str(&s.replica_info.to_string())),
             _ => todo!(),
         }
     }
 
-    fn do_repl_conf() -> Option<String> {
+    async fn do_repl_conf(
+        port: Option<u16>,
+        server: &Arc<RwLock<Server>>,
+        stream: &mut TcpStream,
+    ) -> Option<String> {
+        match port.is_some() {
+            true => {
+                let ip = stream.peer_addr().unwrap();
+                let replica_stream = TcpStream::connect(ip)
+                    .await
+                    .expect("Failed to connect to replica!");
+                let repl = Replica::new(port.unwrap(), replica_stream);
+                let mut s = server.write().await;
+                if s.replicas.is_some() {
+                    s.replicas.as_mut().unwrap().push(repl);
+                } else {
+                    s.replicas = Some(vec![repl])
+                }
+            }
+            false => todo!(),
+        }
         Some(Serializer::to_simple_str("OK"))
     }
 
-    // the return value of this fn is proof I should refactor these commands.
-    async fn do_psync(repl_id: String, server: &Server, stream: &mut TcpStream) -> Option<String> {
-        let master_replid = server.replica_info.master_replid.as_ref().unwrap();
-        let master_repl_offset = server.replica_info.master_repl_offset.to_string();
+    async fn do_psync(
+        repl_id: String,
+        server: &Arc<RwLock<Server>>,
+        stream: &mut TcpStream,
+    ) -> Option<String> {
+        let s = server.read().await;
+        let master_replid = s.replica_info.master_replid.as_ref().unwrap();
+        let master_repl_offset = s.replica_info.master_repl_offset.to_string();
         let repl_command = match repl_id.as_str() {
             "?" => "FULLRESYNC",
             _ => unimplemented!(),
@@ -393,14 +428,18 @@ impl Command {
         }
     }
 
-    pub async fn execute(self, stream: &mut TcpStream, server: &Server) -> anyhow::Result<()> {
+    pub async fn execute(
+        self,
+        stream: &mut TcpStream,
+        server: &Arc<RwLock<Server>>,
+    ) -> anyhow::Result<()> {
         let resp = match self {
             Self::PING => Command::do_ping(),
             Self::Echo(s) => Command::do_echo(s.as_str()),
-            Self::Get(key) => Command::do_get(key, server),
-            Self::Set { key, val, px } => Command::do_set(key, val, px, server),
-            Self::Info(v) => Command::do_info(v.as_str(), server),
-            Self::ReplConf { port: _, capa: _ } => Command::do_repl_conf(),
+            Self::Get(key) => Command::do_get(key, server).await,
+            Self::Set { key, val, px } => Command::do_set(key, val, px, server).await,
+            Self::Info(v) => Command::do_info(v.as_str(), server).await,
+            Self::ReplConf { port, capa: _ } => Command::do_repl_conf(port, server, stream).await,
             Self::PSync(repl_id, _) => Command::do_psync(repl_id, server, stream).await,
         };
         if resp.is_some() {
@@ -414,15 +453,18 @@ impl Command {
 mod tests {
 
     use std::collections::VecDeque;
+    use std::sync::Arc;
     use std::thread::sleep;
     use std::time::Duration;
+
+    use tokio::sync::RwLock;
 
     use super::Command;
     use super::Server;
 
-    #[test]
-    fn test_get_and_set() {
-        let server = Server::master(8000);
+    #[tokio::test]
+    async fn test_get_and_set() {
+        let server = Arc::new(RwLock::new(Server::master(8000)));
         let mut args = VecDeque::with_capacity(4);
         args.push_back("test".to_string());
         args.push_back("val".to_string());
@@ -432,13 +474,13 @@ mod tests {
         let resp: Option<String>;
         match set {
             Command::Set { key, val, px } => {
-                resp = Command::do_set(key, val, px, &server);
+                resp = Command::do_set(key, val, px, &server).await;
             }
             _ => panic!(),
         }
         assert_eq!("+OK\r\n".to_string(), resp.unwrap());
         sleep(Duration::from_millis(101));
-        let get = Command::do_get("test".to_string(), &server);
+        let get = Command::do_get("test".to_string(), &server).await;
         assert_eq!(get.unwrap(), "$-1\r\n".to_string());
     }
 }

@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
+use tokio::sync::RwLock;
 
 use crate::resp::parse::Parser;
 
@@ -17,13 +18,16 @@ use command::Command;
 use replicate::info::ReplicaInfo;
 use store::Store;
 
-#[derive(Debug, Clone)]
+use self::replicate::Replica;
+
+#[derive(Debug)]
 pub struct Server {
     pub port: u16,
     pub master_ip: Option<Ipv4Addr>,
     pub master_port: Option<u16>,
     pub store: Store,
     pub replica_info: ReplicaInfo,
+    pub replicas: Option<Vec<Replica>>,
 }
 
 impl Server {
@@ -33,6 +37,7 @@ impl Server {
         master_port: Option<u16>,
         store: Store,
         replica_info: ReplicaInfo,
+        replicas: Option<Vec<Replica>>,
     ) -> Self {
         Self {
             port,
@@ -40,21 +45,22 @@ impl Server {
             master_port,
             store,
             replica_info,
+            replicas,
         }
     }
 
     pub fn master(port: u16) -> Self {
-        Self::new(port, None, None, Store::new(), ReplicaInfo::master())
+        Self::new(port, None, None, Store::new(), ReplicaInfo::master(), None)
     }
 
     pub fn replica(port: u16, master_ip: Ipv4Addr, master_port: u16) -> Self {
-        // TODO -> replication start-up steps here
         Self::new(
             port,
             Some(master_ip),
             Some(master_port),
             Store::new(),
-            ReplicaInfo::replica(), // TODO -> real
+            ReplicaInfo::replica(),
+            None,
         )
     }
 
@@ -66,12 +72,12 @@ impl Server {
     }
 }
 
-pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Arc<Server> {
+pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Arc<RwLock<Server>> {
     const DEFAULT_PORT: u16 = 6379;
     let port = port.unwrap_or(DEFAULT_PORT);
     match replica_of {
         // clap handles the parsing for the command args. We can unwrap repl_info safely, because if the arg
-        // format is incorrect, this fn won't be called.
+        // format is incorrect, this function won't be called.
         Some(mut repl_info) => {
             // the unwraps here can panic
             let master_port = repl_info.pop().unwrap().parse::<u16>().unwrap();
@@ -79,13 +85,16 @@ pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Ar
                 "localhost" => Ipv4Addr::LOCALHOST,
                 x => Ipv4Addr::from_str(x).unwrap(),
             };
-            Arc::new(Server::replica(port, master_ip, master_port))
+            Arc::new(RwLock::new(Server::replica(port, master_ip, master_port)))
         }
-        None => Arc::new(Server::master(port)),
+        None => Arc::new(RwLock::new(Server::master(port))),
     }
 }
 
-pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> anyhow::Result<()> {
+pub async fn handle_connection(
+    stream: &mut TcpStream,
+    server: &Arc<RwLock<Server>>,
+) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];
     loop {
         let bytes_read = stream
@@ -99,7 +108,7 @@ pub async fn handle_connection(stream: &mut TcpStream, server: Arc<Server>) -> a
         let mut parser = Parser::new(&buffer);
         let data = parser.parse()?;
         if let Some(cmd) = Command::new(data) {
-            cmd.execute(stream, &server).await?;
+            cmd.execute(stream, server).await?;
         }
     }
     Ok(())
