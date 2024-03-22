@@ -1,7 +1,9 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use hashbrown::HashMap;
+
+use tokio::sync::RwLock;
 
 use super::errors::StoreError;
 
@@ -54,31 +56,22 @@ impl Store {
         Self { inner }
     }
 
-    pub fn try_read(&self, key: String) -> R<Option<String>> {
-        let read_lock = self.inner.read();
-        match read_lock {
-            Ok(store) => match store.get(&key) {
-                Some(store_val) => Ok(store_val.to_val()),
-                None => Ok(None),
-            },
-            Err(_) => Err(StoreError::ReadFailed),
+    pub async fn try_read(&self, key: String) -> R<Option<String>> {
+        match self.inner.read().await.get(&key) {
+            Some(store_val) => Ok(store_val.to_val()),
+            None => Ok(None),
         }
     }
 
-    pub fn try_write(&self, key: String, val: String, exp: Option<Duration>) -> R<()> {
-        let write_lock = self.inner.write();
-        match write_lock {
-            Ok(mut store) => {
-                let store_val = StoreValue::new(val, exp);
-                if store.get(&key).is_some() {
-                    store.remove(&key);
-                    store.insert(key, store_val);
-                } else {
-                    store.insert(key, store_val);
-                }
-                Ok(())
-            }
-            Err(_) => Err(StoreError::WriteFailed),
+    pub async fn try_write(&self, key: String, val: String, exp: Option<Duration>) -> R<()> {
+        let store_val = StoreValue::new(val, exp);
+        let mut write = self.inner.write().await;
+        if write.get(&key).is_some() {
+            write.remove(&key);
+            write.insert(key, store_val);
+        } else {
+            write.insert(key, store_val);
         }
+        Ok(())
     }
 }

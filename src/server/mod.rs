@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::resp::parse::Parser;
 
@@ -92,12 +92,14 @@ pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Ar
 }
 
 pub async fn handle_connection(
-    stream: &mut TcpStream,
+    stream: Arc<Mutex<TcpStream>>,
     server: &Arc<RwLock<Server>>,
 ) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];
     loop {
         let bytes_read = stream
+            .lock()
+            .await
             .read(&mut buffer)
             .await
             .expect("Failed to read from client stream!");
@@ -107,8 +109,9 @@ pub async fn handle_connection(
 
         let mut parser = Parser::new(&buffer);
         let data = parser.parse()?;
+        let arc_stream = Arc::clone(&stream);
         if let Some(cmd) = Command::new(data) {
-            cmd.execute(stream, server).await?;
+            cmd.execute(&arc_stream, server).await?;
         }
     }
     Ok(())

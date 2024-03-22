@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::{arg, Parser};
 use redis_starter_rust::server::replicate::info::Role;
 use tokio::net::TcpListener;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use redis_starter_rust::server::replicate::command::do_repl_handshake;
 use redis_starter_rust::server::{handle_connection, init_on_startup, Server};
@@ -38,11 +38,12 @@ async fn main() {
         .expect("Failed to bind to socket!");
     loop {
         match listener.accept().await {
-            Ok((mut stream, client_connection)) => {
+            Ok((stream, client_connection)) => {
                 println!("Received connection from client: {}", client_connection);
-                let s = Arc::clone(&server);
+                let arc_server = Arc::clone(&server);
+                let arc_stream = Arc::new(Mutex::new(stream));
                 tokio::spawn(async move {
-                    handle_connection(&mut stream, &s).await.unwrap();
+                    handle_connection(arc_stream, &arc_server).await.unwrap();
                 });
             }
             Err(e) => {
