@@ -9,15 +9,13 @@ use std::time::Duration;
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
 
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
-use tokio::sync::{Mutex, RwLock};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::sync::RwLock;
 
 use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
 
 use super::errors::CommandError;
-use super::replicate::Replica;
 use super::store::file::empty_store_file_bytes;
 use super::Server;
 
@@ -140,6 +138,13 @@ impl CommandOption {
     fn new(name: String, val: Option<Vec<String>>) -> Self {
         Self { name, val }
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum CommandResult {
+    Ok,
+    Err,
+    ReplConf,
 }
 
 #[derive(Debug)]
@@ -278,26 +283,28 @@ impl Command {
     }
 
     #[inline]
-    async fn do_ping(stream: &Arc<Mutex<TcpStream>>) {
+    async fn do_ping<W: AsyncWrite + Unpin>(mut stream: W) -> R<CommandResult> {
         stream
-            .lock()
-            .await
             .write_all(b"+PONG\r\n")
             .await
             .expect("Response write failed!");
+        Ok(CommandResult::Ok)
     }
 
     #[inline]
-    async fn do_echo(arg: &str, stream: &Arc<Mutex<TcpStream>>) {
+    async fn do_echo<W: AsyncWrite + Unpin>(arg: &str, mut stream: W) -> R<CommandResult> {
         stream
-            .lock()
-            .await
             .write_all(Serializer::to_simple_str(arg).as_bytes())
             .await
             .expect("Response write failed!");
+        Ok(CommandResult::Ok)
     }
 
-    async fn do_get(key: String, server: &Arc<RwLock<Server>>, stream: &Arc<Mutex<TcpStream>>) {
+    async fn do_get<W: AsyncWrite + Unpin>(
+        key: String,
+        server: &Arc<RwLock<Server>>,
+        mut stream: W,
+    ) -> R<CommandResult> {
         let s = server.read().await;
         let resp = match s.store.try_read(key.to_owned()).await {
             Ok(val) => match val {
@@ -308,109 +315,81 @@ impl Command {
             Err(_) => "$-1\r\n".to_string(),
         };
         stream
-            .lock()
-            .await
             .write_all(resp.as_bytes())
             .await
             .expect("Response write failed!");
+        Ok(CommandResult::Ok)
     }
 
-    async fn do_set(
+    async fn do_set<W: AsyncWrite + Unpin>(
         key: String,
         val: String,
         exp: Option<Duration>,
         server: &Arc<RwLock<Server>>,
-        stream: &Arc<Mutex<TcpStream>>,
-    ) {
+        mut stream: W,
+    ) -> R<CommandResult> {
         let mut s = server.write().await;
-        let resp = match s
-            .store
-            .try_write(key.clone(), val.clone(), exp.clone())
-            .await
-        {
-            Ok(_) => {
-                if s.replicas.is_some() {
-                    // re-constructing the byte slice we recieved then deconstructed. big brain move
-                    // refactor me!
-                    let mut cmd_vec = std::vec::Vec::with_capacity(5);
-                    cmd_vec.push("set");
-                    cmd_vec.push(&key);
-                    cmd_vec.push(&val);
-                    // skipping the px command for now, this will bite later I'm sure.
-                    let cmd = Serializer::to_arr(cmd_vec);
-                    for repl in s.replicas.as_mut().unwrap() {
-                        repl.stream
-                            .lock()
-                            .await
-                            .write_all(cmd.clone().as_bytes())
-                            .await
-                            .expect("Replica write failed!");
-                    }
-                }
-
-                "+OK\r\n"
-            }
+        let resp = match s.store.try_write(key.clone(), val.clone(), exp).await {
+            Ok(_) => "+OK\r\n",
             // TODO: error handling
             Err(_) => "$-1\r\n",
         };
         stream
-            .lock()
-            .await
             .write_all(resp.as_bytes())
             .await
             .expect("Response write failed!");
+        if s.replicas.is_some() {
+            // re-constructing the byte slice we recieved then deconstructed. big brain move
+            // refactor me!
+            let mut cmd_vec = std::vec::Vec::with_capacity(5);
+            cmd_vec.push("set");
+            cmd_vec.push(&key);
+            cmd_vec.push(&val);
+            // skipping the px command for now, this will bite later I'm sure.
+            let cmd = Serializer::to_arr(cmd_vec);
+            if s.repl_queue.is_some() {
+                s.repl_queue.as_mut().unwrap().push(cmd);
+            } else {
+                s.repl_queue = Some(vec![cmd]);
+            }
+        }
+        Ok(CommandResult::Ok)
     }
 
-    async fn do_info(
+    async fn do_info<W: AsyncWrite + Unpin>(
         info_type: &str,
         server: &Arc<RwLock<Server>>,
-        stream: &Arc<Mutex<TcpStream>>,
-    ) {
+        mut stream: W,
+    ) -> R<CommandResult> {
         let s = server.read().await;
         let resp = match info_type {
             "replication" => Serializer::to_bulk_str(&s.replica_info.to_string()),
             _ => todo!(),
         };
         stream
-            .lock()
-            .await
-            .write_all(&resp.as_bytes())
+            .write_all(resp.as_bytes())
             .await
             .expect("Response write failed!");
+        Ok(CommandResult::Ok)
     }
 
-    async fn do_repl_conf(
-        port: Option<u16>,
-        server: &Arc<RwLock<Server>>,
-        stream: &Arc<Mutex<TcpStream>>,
-    ) {
-        match port.is_some() {
-            true => {
-                let socket_addr = stream.lock().await.peer_addr().unwrap();
-                let repl = Replica::new(socket_addr, Arc::clone(stream));
-                let mut s = server.write().await;
-                if s.replicas.is_some() {
-                    s.replicas.as_mut().unwrap().push(repl);
-                } else {
-                    s.replicas = Some(vec![repl])
-                }
-            }
-            false => {} // currently not doing anything with psync
-        }
+    async fn do_repl_conf<W: AsyncWrite + Unpin>(
+        _port: Option<u16>,
+        mut stream: W,
+    ) -> R<CommandResult> {
         let resp = Serializer::to_simple_str("OK");
         stream
-            .lock()
-            .await
-            .write_all(&resp.as_bytes())
+            .write_all(resp.as_bytes())
             .await
             .expect("Response write failed!");
+        Ok(CommandResult::Ok)
     }
 
-    async fn do_psync(
+    async fn do_psync<W: AsyncWrite + Unpin>(
         repl_id: String,
         server: &Arc<RwLock<Server>>,
-        stream: &Arc<Mutex<TcpStream>>,
-    ) {
+        mut stream: W,
+    ) -> R<CommandResult> {
         let s = server.read().await;
         let master_replid = s.replica_info.master_replid.as_ref().unwrap();
         let master_repl_offset = s.replica_info.master_repl_offset.to_string();
@@ -420,14 +399,16 @@ impl Command {
         };
         let command_str = [repl_command, " ", &master_replid, " ", &master_repl_offset].concat();
         let resync = Serializer::to_simple_str(&command_str);
-        let mut lock = stream.lock().await;
-        lock.write_all(resync.as_bytes())
+        stream
+            .write_all(resync.as_bytes())
             .await
             .expect("Failed to write!");
         let store_file = Serializer::store_file(empty_store_file_bytes());
-        lock.write_all(store_file.as_slice())
+        stream
+            .write_all(store_file.as_slice())
             .await
             .expect("Failed to write!");
+        Ok(CommandResult::ReplConf)
     }
 
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
@@ -489,20 +470,19 @@ impl Command {
         }
     }
 
-    pub async fn execute(
+    pub async fn execute<W: AsyncWrite + Unpin>(
         self,
-        stream: &Arc<Mutex<TcpStream>>,
+        stream: W,
         server: &Arc<RwLock<Server>>,
-    ) -> anyhow::Result<()> {
+    ) -> R<CommandResult> {
         match self {
             Self::PING => Command::do_ping(stream).await,
             Self::Echo(s) => Command::do_echo(s.as_str(), stream).await,
             Self::Get(key) => Command::do_get(key, server, stream).await,
             Self::Set { key, val, px } => Command::do_set(key, val, px, server, stream).await,
             Self::Info(v) => Command::do_info(v.as_str(), server, stream).await,
-            Self::ReplConf { port, capa: _ } => Command::do_repl_conf(port, server, stream).await,
+            Self::ReplConf { port, capa: _ } => Command::do_repl_conf(port, stream).await,
             Self::PSync(repl_id, _) => Command::do_psync(repl_id, server, stream).await,
-        };
-        Ok(())
+        }
     }
 }

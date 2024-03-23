@@ -1,3 +1,5 @@
+use super::data::DataType;
+
 #[derive(Debug)]
 pub struct Serializer {}
 
@@ -24,6 +26,23 @@ impl Serializer {
         let mut buffer = format!("${}\r\n", bytes.len()).as_bytes().to_vec();
         buffer.append(&mut bytes);
         buffer
+    }
+
+    pub fn serialize_data(dt: DataType) -> String {
+        match dt {
+            DataType::SimpleString(s) => Serializer::to_simple_str(&s),
+            DataType::BulkString(s) => Serializer::to_bulk_str(&s),
+            DataType::Array(vec) => {
+                let mut buff = Vec::with_capacity(8);
+                for dt in vec {
+                    let serial = Serializer::serialize_data(dt);
+                    buff.push(serial);
+                }
+                // more nonsense
+                Serializer::to_arr(buff.iter().map(|s| s.as_str()).collect())
+            }
+            _ => unimplemented!(),
+        }
     }
 }
 

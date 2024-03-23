@@ -36,7 +36,7 @@ async fn do_follower_capa(s: &mut TcpStream) -> R<()> {
     Ok(())
 }
 
-async fn do_follower_psync(s: &mut TcpStream, _server: Arc<RwLock<Server>>) -> R<()> {
+async fn do_follower_psync(s: &mut TcpStream, _server: &Arc<RwLock<Server>>) -> R<()> {
     let psync = Serializer::to_arr(Vec::from(["PSYNC", "?", "-1"]));
     write(s, psync).await.expect("Write failed!");
     expect_resp(s, "ok").await.expect("Read failed!");
@@ -51,6 +51,8 @@ pub async fn do_repl_handshake(server: Arc<RwLock<Server>>) -> R<()> {
     do_follower_ping(&mut stream).await?;
     do_follower_listen(&mut stream, &server).await?;
     do_follower_capa(&mut stream).await?;
-    do_follower_psync(&mut stream, server).await?;
+    do_follower_psync(&mut stream, &server).await?;
+    // handshake complete!
+
     Ok(())
 }

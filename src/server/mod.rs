@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, RwLock};
 
@@ -18,6 +18,7 @@ use command::Command;
 use replicate::info::ReplicaInfo;
 use store::Store;
 
+use self::command::CommandResult;
 use self::replicate::Replica;
 
 #[derive(Debug)]
@@ -28,6 +29,7 @@ pub struct Server {
     pub store: Store,
     pub replica_info: ReplicaInfo,
     pub replicas: Option<Vec<Replica>>,
+    pub repl_queue: Option<Vec<String>>,
 }
 
 impl Server {
@@ -38,6 +40,7 @@ impl Server {
         store: Store,
         replica_info: ReplicaInfo,
         replicas: Option<Vec<Replica>>,
+        repl_queue: Option<Vec<String>>,
     ) -> Self {
         Self {
             port,
@@ -46,11 +49,20 @@ impl Server {
             store,
             replica_info,
             replicas,
+            repl_queue,
         }
     }
 
     pub fn master(port: u16) -> Self {
-        Self::new(port, None, None, Store::new(), ReplicaInfo::master(), None)
+        Self::new(
+            port,
+            None,
+            None,
+            Store::new(),
+            ReplicaInfo::master(),
+            None,
+            None,
+        )
     }
 
     pub fn replica(port: u16, master_ip: Ipv4Addr, master_port: u16) -> Self {
@@ -61,6 +73,7 @@ impl Server {
             Store::new(),
             ReplicaInfo::replica(),
             None,
+            None,
         )
     }
 
@@ -69,6 +82,39 @@ impl Server {
             (Some(ip), Some(port)) => Some(SocketAddrV4::new(ip, port)),
             _ => None,
         }
+    }
+
+    // not how I want it to work
+    pub async fn propagate(&mut self) -> anyhow::Result<()> {
+        println!("{:#?}", self);
+        if self.replicas.is_some() {
+            let mut remove = Vec::new();
+            for (i, repl) in self.replicas.as_mut().unwrap().iter().enumerate() {
+                let mut lock = repl.stream.lock().await;
+                println!("Replica: {:#?}", repl);
+                if self.repl_queue.is_some() {
+                    let cmd_q = self.repl_queue.as_mut().unwrap();
+                    for cmd in cmd_q {
+                        match lock.write_all(cmd.clone().as_bytes()).await {
+                            Ok(_) => {
+                                continue;
+                            }
+                            Err(_) => {
+                                eprintln!("Replica write failed!");
+                                self.replica_info.connected_slaves -= 1;
+                                remove.push(i);
+                            }
+                        }
+                    }
+                };
+                self.repl_queue = None;
+            }
+            for i in remove.iter().rev() {
+                self.replicas.as_mut().unwrap().swap_remove(*i);
+            }
+        }
+        println!("didnt call this?");
+        Ok(())
     }
 }
 
@@ -97,22 +143,37 @@ pub async fn handle_connection(
 ) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];
     loop {
-        let bytes_read = stream
+        let _ = stream
             .lock()
             .await
             .read(&mut buffer)
             .await
             .expect("Failed to read from client stream!");
-        if bytes_read == 0 {
-            break;
-        }
-
         let mut parser = Parser::new(&buffer);
-        let data = parser.parse()?;
-        let arc_stream = Arc::clone(&stream);
-        if let Some(cmd) = Command::new(data) {
-            cmd.execute(&arc_stream, server).await?;
+        let Ok(data) = parser.parse() else {
+            break;
+        };
+        // writing the replication 11 test down in my note
+        let mut lock = stream.lock().await;
+        let (_, write_stream) = lock.split();
+        let Some(cmd) = Command::new(data) else {
+            break;
+        };
+        let res = cmd.execute(write_stream, server).await;
+        if res.is_ok() {
+            if res.unwrap() == CommandResult::ReplConf {
+                let mut server_lock = server.write().await;
+
+                let repl = Replica::new(Arc::clone(&stream));
+                if server_lock.replicas.is_some() {
+                    server_lock.replicas.as_mut().unwrap().push(repl);
+                    server_lock.replica_info.connected_slaves += 1;
+                } else {
+                    server_lock.replicas = Some(vec![repl]);
+                }
+            }
         }
     }
+    let _ = server.write().await.propagate().await;
     Ok(())
 }
