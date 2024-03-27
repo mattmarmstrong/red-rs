@@ -85,13 +85,11 @@ impl Server {
     }
 
     // not how I want it to work
-    pub async fn propagate(&mut self) -> anyhow::Result<()> {
-        println!("{:#?}", self);
+    pub async fn propagate(&mut self, stream: &Arc<Mutex<TcpStream>>) -> anyhow::Result<()> {
         if self.replicas.is_some() {
-            let mut remove = Vec::new();
-            for (i, repl) in self.replicas.as_mut().unwrap().iter().enumerate() {
-                let mut lock = repl.stream.lock().await;
-                println!("Replica: {:#?}", repl);
+            let remove = Vec::new();
+            for _ in self.replicas.as_mut().unwrap().iter() {
+                let mut lock = stream.lock().await;
                 if self.repl_queue.is_some() {
                     let cmd_q = self.repl_queue.as_mut().unwrap();
                     for cmd in cmd_q {
@@ -102,18 +100,18 @@ impl Server {
                             Err(_) => {
                                 eprintln!("Replica write failed!");
                                 self.replica_info.connected_slaves -= 1;
-                                remove.push(i);
+                                // remove.push(i);
                             }
                         }
                     }
                 };
-                self.repl_queue = None;
             }
+            self.repl_queue = None;
+
             for i in remove.iter().rev() {
                 self.replicas.as_mut().unwrap().swap_remove(*i);
             }
         }
-        println!("didnt call this?");
         Ok(())
     }
 }
@@ -138,12 +136,12 @@ pub fn init_on_startup(port: Option<u16>, replica_of: Option<Vec<String>>) -> Ar
 }
 
 pub async fn handle_connection(
-    stream: Arc<Mutex<TcpStream>>,
+    stream: &Arc<Mutex<TcpStream>>,
     server: &Arc<RwLock<Server>>,
 ) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];
     loop {
-        let _ = stream
+        stream
             .lock()
             .await
             .read(&mut buffer)
@@ -174,6 +172,5 @@ pub async fn handle_connection(
             }
         }
     }
-    let _ = server.write().await.propagate().await;
     Ok(())
 }

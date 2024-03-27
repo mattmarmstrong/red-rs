@@ -41,9 +41,15 @@ async fn main() {
             Ok((stream, client_connection)) => {
                 println!("Received connection from client: {}", client_connection);
                 let arc_server = Arc::clone(&server);
-                let arc_stream = Arc::new(Mutex::new(stream));
+                let stream_ref = Arc::new(Mutex::new(stream));
                 tokio::spawn(async move {
-                    handle_connection(arc_stream, &arc_server).await.unwrap();
+                    handle_connection(&stream_ref, &arc_server).await.unwrap();
+                    arc_server
+                        .write()
+                        .await
+                        .propagate(&stream_ref)
+                        .await
+                        .unwrap();
                 });
             }
             Err(e) => {

@@ -163,6 +163,7 @@ pub enum Command {
         port: Option<u16>,
         capa: Option<String>,
     },
+    Tipe(String),
 }
 
 impl Command {
@@ -238,6 +239,13 @@ impl Command {
                 }
             }
             _ => Err(CommandError::InvalidArgs),
+        }
+    }
+
+    fn tipe(mut args: Vec<String>) -> R<Self> {
+        match args.pop_front() {
+            Some(k) => Ok(Self::Tipe(k)),
+            None => Err(CommandError::InvalidArgs),
         }
     }
 
@@ -334,10 +342,7 @@ impl Command {
             // TODO: error handling
             Err(_) => "$-1\r\n",
         };
-        stream
-            .write_all(resp.as_bytes())
-            .await
-            .expect("Response write failed!");
+        let _ = stream.write_all(resp.as_bytes()).await;
         if s.replicas.is_some() {
             // re-constructing the byte slice we recieved then deconstructed. big brain move
             // refactor me!
@@ -353,6 +358,25 @@ impl Command {
                 s.repl_queue = Some(vec![cmd]);
             }
         }
+        Ok(CommandResult::Ok)
+    }
+
+    async fn do_tipe<W: AsyncWrite + Unpin>(
+        key: String,
+        server: &Arc<RwLock<Server>>,
+        mut stream: W,
+    ) -> R<CommandResult> {
+        let read = server.read().await;
+        let read_res = read.store.try_read(key).await.unwrap();
+        let resp = match read_res {
+            // TODO: Check type
+            Some(_) => Serializer::to_simple_str("string"),
+            None => Serializer::to_simple_str("none"),
+        };
+        stream
+            .write_all(resp.as_bytes())
+            .await
+            .expect("Response write failed!");
         Ok(CommandResult::Ok)
     }
 
@@ -425,6 +449,7 @@ impl Command {
                     "info" => Command::info(args),
                     "replconf" => Command::repl_conf(args),
                     "psync" => Command::psync(args),
+                    "type" => Command::tipe(args),
                     _ => Err(CommandError::NotFound),
                 }
             }
@@ -483,6 +508,7 @@ impl Command {
             Self::Info(v) => Command::do_info(v.as_str(), server, stream).await,
             Self::ReplConf { port, capa: _ } => Command::do_repl_conf(port, stream).await,
             Self::PSync(repl_id, _) => Command::do_psync(repl_id, server, stream).await,
+            Self::Tipe(key) => Command::do_tipe(key, server, stream).await,
         }
     }
 }
