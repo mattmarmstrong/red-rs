@@ -84,35 +84,8 @@ impl Server {
         }
     }
 
-    // not how I want it to work
-    pub async fn propagate(&mut self, stream: &Arc<Mutex<TcpStream>>) -> anyhow::Result<()> {
-        if self.replicas.is_some() {
-            let remove = Vec::new();
-            for _ in self.replicas.as_mut().unwrap().iter() {
-                let mut lock = stream.lock().await;
-                if self.repl_queue.is_some() {
-                    let cmd_q = self.repl_queue.as_mut().unwrap();
-                    for cmd in cmd_q {
-                        match lock.write_all(cmd.clone().as_bytes()).await {
-                            Ok(_) => {
-                                continue;
-                            }
-                            Err(_) => {
-                                eprintln!("Replica write failed!");
-                                self.replica_info.connected_slaves -= 1;
-                                // remove.push(i);
-                            }
-                        }
-                    }
-                };
-            }
-            self.repl_queue = None;
-
-            for i in remove.iter().rev() {
-                self.replicas.as_mut().unwrap().swap_remove(*i);
-            }
-        }
-        Ok(())
+    pub async fn propagate(&mut self, _stream: &Arc<Mutex<TcpStream>>) -> anyhow::Result<()> {
+        unimplemented!()
     }
 }
 
@@ -152,12 +125,10 @@ pub async fn handle_connection(
             break;
         };
         // writing the replication 11 test down in my note
-        let mut lock = stream.lock().await;
-        let (_, write_stream) = lock.split();
         let Some(cmd) = Command::new(data) else {
             break;
         };
-        let res = cmd.execute(write_stream, server).await;
+        let res = cmd.execute(stream, server).await;
         if res.is_ok() {
             if res.unwrap() == CommandResult::ReplConf {
                 let mut server_lock = server.write().await;

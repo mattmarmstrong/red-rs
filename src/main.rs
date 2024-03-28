@@ -44,12 +44,6 @@ async fn main() {
                 let stream_ref = Arc::new(Mutex::new(stream));
                 tokio::spawn(async move {
                     handle_connection(&stream_ref, &arc_server).await.unwrap();
-                    arc_server
-                        .write()
-                        .await
-                        .propagate(&stream_ref)
-                        .await
-                        .unwrap();
                 });
             }
             Err(e) => {
