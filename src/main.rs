@@ -26,9 +26,11 @@ async fn main() {
 
     // Move me
     if server.read().await.replica_info.role == Role::Slave {
-        let s = Arc::clone(&server);
+        let follower_ref = Arc::clone(&server);
         tokio::spawn(async move {
-            do_repl_handshake(s).await.expect("Handshake failed!");
+            do_repl_handshake(follower_ref)
+                .await
+                .expect("Handshake failed!");
         });
     }
     // TODO -> un-hardcode localhost
@@ -41,9 +43,9 @@ async fn main() {
             Ok((stream, client_connection)) => {
                 println!("Received connection from client: {}", client_connection);
                 let arc_server = Arc::clone(&server);
-                let stream_ref = Arc::new(Mutex::new(stream));
+                let arc_stream = Arc::new(Mutex::new(stream));
                 tokio::spawn(async move {
-                    handle_connection(&stream_ref, &arc_server).await.unwrap();
+                    handle_connection(&arc_stream, &arc_server).await.unwrap();
                 });
             }
             Err(e) => {

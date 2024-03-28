@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::str::FromStr;
 use std::sync::Arc;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, RwLock};
 
@@ -18,7 +18,6 @@ use command::Command;
 use replicate::info::ReplicaInfo;
 use store::Store;
 
-use self::command::CommandResult;
 use self::replicate::Replica;
 
 #[derive(Debug)]
@@ -114,34 +113,21 @@ pub async fn handle_connection(
 ) -> anyhow::Result<()> {
     let mut buffer = [0; 1024];
     loop {
-        stream
-            .lock()
-            .await
+        let mut stream_lock = stream.lock().await;
+        let bytes_read = stream_lock
             .read(&mut buffer)
             .await
             .expect("Failed to read from client stream!");
-        let mut parser = Parser::new(&buffer);
-        let Ok(data) = parser.parse() else {
+        if bytes_read == 0 {
             break;
-        };
-        // writing the replication 11 test down in my note
-        let Some(cmd) = Command::new(data) else {
-            break;
-        };
-        let res = cmd.execute(stream, server).await;
-        if res.is_ok() {
-            if res.unwrap() == CommandResult::ReplConf {
-                let mut server_lock = server.write().await;
+        }
 
-                let repl = Replica::new(Arc::clone(&stream));
-                if server_lock.replicas.is_some() {
-                    server_lock.replicas.as_mut().unwrap().push(repl);
-                    server_lock.replica_info.connected_slaves += 1;
-                } else {
-                    server_lock.replicas = Some(vec![repl]);
-                }
-            }
+        let mut parser = Parser::new(&buffer);
+        let data = parser.parse()?;
+        if let Some(cmd) = Command::new(data) {
+            cmd.execute(&mut stream_lock, server).await?;
         }
     }
+    println!("Exiting");
     Ok(())
 }
