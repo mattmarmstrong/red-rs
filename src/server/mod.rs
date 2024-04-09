@@ -128,6 +128,5 @@ pub async fn handle_connection(
             cmd.execute(&mut stream_lock, server).await?;
         }
     }
-    println!("Exiting");
     Ok(())
 }

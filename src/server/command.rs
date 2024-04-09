@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
+use regex::Regex;
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -121,9 +122,13 @@ lazy_static! {
         let psync_entry = CommandEntry::new(2, Some(psync_options));
         commands.insert("psync".to_string(), psync_entry);
 
-        //Command - type
+        // Command - type
         let type_entry = CommandEntry::new(1, None);
         commands.insert("type".to_string(), type_entry);
+
+        // Command - xadd
+        let xadd_entry = CommandEntry::new(2, None);
+        commands.insert("xadd".to_string(), xadd_entry);
 
         commands
     };
@@ -168,6 +173,11 @@ pub enum Command {
         capa: Option<String>,
     },
     Tipe(String),
+    XAdd {
+        key: String,
+        id: Option<(usize, usize)>,
+        values: Vec<(String, String)>,
+    },
 }
 
 impl Command {
@@ -295,6 +305,55 @@ impl Command {
         }
     }
 
+    fn xadd(mut args: Vec<String>) -> R<Self> {
+        let key = args.pop_front().unwrap();
+        // stream key regex
+        let re = Regex::new(r"[0-9]+-[0-9]+").unwrap();
+        let stream_id: Option<(usize, usize)>;
+        let k: String;
+        let next = args.pop_front().unwrap();
+        if re.is_match(&next) {
+            // Fix me
+            let mut split = next.split('-');
+            let id = split
+                .next()
+                .unwrap()
+                .parse::<usize>()
+                .expect("Could not parse ID!");
+            let seq = split
+                .next()
+                .unwrap()
+                .parse::<usize>()
+                .expect("Could not parse sequence!");
+            stream_id = Some((id, seq));
+            k = args.pop_front().unwrap();
+        } else {
+            stream_id = None;
+            k = next
+        }
+        let mut buffer = Vec::with_capacity(8);
+        let v = args.pop_front().unwrap();
+        buffer.push_back((k, v));
+        let remaining_args = args.len();
+        // The way this is written is extremely confusing, but since the first stream key has technically been popped
+        // already, this should be an odd number.
+        match remaining_args % 2 == 0 {
+            true => {
+                for _ in (0..remaining_args).step_by(2) {
+                    let k = args.pop_front().unwrap();
+                    let v = args.pop_front().unwrap();
+                    buffer.push_back((k, v))
+                }
+                Ok(Self::XAdd {
+                    key,
+                    id: stream_id,
+                    values: buffer,
+                })
+            }
+            false => Err(CommandError::InvalidArgs),
+        }
+    }
+
     #[inline]
     async fn do_ping(stream: &mut TcpStream) -> R<CommandResult> {
         stream
@@ -319,13 +378,9 @@ impl Command {
         stream: &mut TcpStream,
     ) -> R<CommandResult> {
         let s = server.read().await;
-        let resp = match s.store.try_read(key.to_owned()).await {
-            Ok(val) => match val {
-                Some(v) => Serializer::to_bulk_str(&v),
-                None => "$-1\r\n".to_string(),
-            },
-            // TODO: handle read errors more gracefully
-            Err(_) => "$-1\r\n".to_string(),
+        let resp = match s.store.kv_store.try_read(key.to_owned()) {
+            Some(v) => Serializer::to_bulk_str(&v),
+            None => "$-1\r\n".to_string(),
         };
         stream
             .write_all(resp.as_bytes())
@@ -342,7 +397,7 @@ impl Command {
         stream: &mut TcpStream,
     ) -> R<CommandResult> {
         let mut s = server.write().await;
-        let resp = match s.store.try_write(key.clone(), val.clone(), exp).await {
+        let resp = match s.store.kv_store.try_write(key.clone(), val.clone(), exp) {
             Ok(_) => "+OK\r\n",
             // TODO: error handling
             Err(_) => "$-1\r\n",
@@ -375,11 +430,12 @@ impl Command {
         stream: &mut TcpStream,
     ) -> R<CommandResult> {
         let read = server.read().await;
-        let read_res = read.store.try_read(key).await.unwrap();
-        let resp = match read_res {
-            // TODO: Check type
+        let resp = match read.store.kv_store.try_read(key.to_owned()) {
             Some(_) => Serializer::to_simple_str("string"),
-            None => Serializer::to_simple_str("none"),
+            None => match read.store.stream_store.try_read(key) {
+                Some(_) => Serializer::to_simple_str("stream"),
+                None => Serializer::to_simple_str("none"),
+            },
         };
         stream
             .write_all(resp.as_bytes())
@@ -440,6 +496,27 @@ impl Command {
         Ok(CommandResult::ReplConf)
     }
 
+    async fn do_xadd(
+        key: String,
+        values: Vec<(String, String)>,
+        stream_id: Option<(usize, usize)>,
+        server: &Arc<RwLock<Server>>,
+        stream: &mut TcpStream,
+    ) -> R<CommandResult> {
+        let mut s = server.write().await;
+        let resp = match s.store.stream_store.try_write(key, values, stream_id) {
+            Ok((id, seq)) => Serializer::to_bulk_str(
+                &[id.to_string().as_str(), "-", seq.to_string().as_str()].concat(),
+            ),
+            Err(_) => "$-1\r\n".to_string(),
+        };
+        stream
+            .write_all(resp.as_bytes())
+            .await
+            .expect("Response write failed!");
+        Ok(CommandResult::Ok)
+    }
+
     fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
         match str {
             // No args commands
@@ -455,6 +532,7 @@ impl Command {
                     "replconf" => Command::repl_conf(args),
                     "psync" => Command::psync(args),
                     "type" => Command::tipe(args),
+                    "xadd" => Command::xadd(args),
                     _ => Err(CommandError::NotFound),
                 }
             }
@@ -514,6 +592,9 @@ impl Command {
             Self::ReplConf { port, capa: _ } => Command::do_repl_conf(port, stream).await,
             Self::PSync(repl_id, _) => Command::do_psync(repl_id, server, stream).await,
             Self::Tipe(key) => Command::do_tipe(key, server, stream).await,
+            Self::XAdd { key, id, values } => {
+                Command::do_xadd(key, values, id, server, stream).await
+            }
         }
     }
 }
