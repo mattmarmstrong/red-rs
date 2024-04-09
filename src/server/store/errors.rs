@@ -2,6 +2,7 @@
 pub enum StoreError {
     ReadFailed,
     WriteFailed,
+    StreamIDZero,
     InvalidStreamID,
 }
 
@@ -13,6 +14,10 @@ impl std::fmt::Display for StoreError {
             }
             Self::WriteFailed => {
                 write!(f, "Store Error: Write failed!")
+            }
+            // Should move these
+            Self::StreamIDZero => {
+                write!(f, "Store Error: Stream ID must not be zero!")
             }
             Self::InvalidStreamID => {
                 write!(f, "Store Error: Invalid stream ID!")

@@ -18,6 +18,7 @@ use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
 
 use super::errors::CommandError;
+use super::store::errors::StoreError;
 use super::store::file::empty_store_file_bytes;
 use super::Server;
 
@@ -488,7 +489,7 @@ impl Command {
             .write_all(resync.as_bytes())
             .await
             .expect("Failed to write!");
-        let store_file = Serializer::store_file(empty_store_file_bytes());
+        let store_file = Serializer::serialize_store_file(empty_store_file_bytes());
         stream
             .write_all(store_file.as_slice())
             .await
@@ -508,7 +509,15 @@ impl Command {
             Ok((id, seq)) => Serializer::to_bulk_str(
                 &[id.to_string().as_str(), "-", seq.to_string().as_str()].concat(),
             ),
-            Err(_) => "$-1\r\n".to_string(),
+            Err(e) => match e {
+                StoreError::StreamIDZero => {
+                    Serializer::to_simple_err("The ID specified in XADD must be greater than 0-0")
+                }
+                StoreError::InvalidStreamID => Serializer::to_simple_err(
+                    "The ID specified in XADD is equal or smaller than the target stream top item",
+                ),
+                _ => Serializer::to_simple_err("Unknown error occurred"),
+            },
         };
         stream
             .write_all(resp.as_bytes())

@@ -115,21 +115,25 @@ fn new_stream_id(last: Option<(usize, usize)>) -> R<(usize, usize)> {
 }
 
 fn get_stream_id(last: Option<(usize, usize)>, next: Option<(usize, usize)>) -> R<(usize, usize)> {
-    match (last.is_some(), next.is_some()) {
-        (true, true) => {
-            let (last_id, last_seq) = last.unwrap();
-            let (next_id, next_seq) = next.unwrap();
-            match (next_id == last_id, next_seq > last_seq) {
-                (true, true) => Ok((last_id, last_seq)),
-                (true, false) => Err(StoreError::InvalidStreamID),
-                (false, _) => match next_id > last_id {
-                    true => Ok((next_id, next_seq)),
-                    false => Err(StoreError::InvalidStreamID),
-                },
+    if next.is_some() && next.unwrap() == (0, 0) {
+        Err(StoreError::StreamIDZero)
+    } else {
+        match (last.is_some(), next.is_some()) {
+            (true, true) => {
+                let (last_id, last_seq) = last.unwrap();
+                let (next_id, next_seq) = next.unwrap();
+                match (next_id == last_id, next_seq > last_seq) {
+                    (true, true) => Ok((next_id, next_seq)),
+                    (true, false) => Err(StoreError::InvalidStreamID),
+                    (false, _) => match next_id > last_id {
+                        true => Ok((next_id, next_seq)),
+                        false => Err(StoreError::InvalidStreamID),
+                    },
+                }
             }
+            (false, true) => Ok(next.unwrap()),
+            _ => new_stream_id(last),
         }
-        (false, true) => Ok(next.unwrap()),
-        _ => new_stream_id(last),
     }
 }
 
@@ -166,7 +170,7 @@ impl StreamStore {
             let last = get.iter().last().unwrap();
             (id, seq) = get_stream_id(Some((last.id, last.seq)), stream_id)?;
             let stream_value = StreamValue::new(id, seq, values);
-            get.push_front(stream_value);
+            get.push_back(stream_value);
             self.inner.remove(&key);
             self.inner.insert(key, get);
         } else {

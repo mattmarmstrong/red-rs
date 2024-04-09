@@ -22,7 +22,11 @@ impl Serializer {
         buffer
     }
 
-    pub fn store_file(mut bytes: Vec<u8>) -> Vec<u8> {
+    pub fn to_simple_err(str: &str) -> String {
+        format!("-ERR {}\r\n", str)
+    }
+
+    pub fn serialize_store_file(mut bytes: Vec<u8>) -> Vec<u8> {
         let mut buffer = format!("${}\r\n", bytes.len()).as_bytes().to_vec();
         buffer.append(&mut bytes);
         buffer
