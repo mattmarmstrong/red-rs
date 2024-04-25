@@ -78,61 +78,183 @@ impl KVStore {
 // Streams
 // Making the decision to add a separate StreamStore to simplify the initial implementation.
 
-// I'm not convinced this should go here
-#[derive(Debug, Clone)]
-pub struct StreamValue {
-    id: usize,
-    seq: usize,
-    _values: Vec<(String, String)>,
+const WC_STR: &str = "*";
+// using the 65th bit to determine if an id is a wildcard.
+const WC_BIT: u128 = 1 << 64;
+
+#[inline]
+fn is_wc(v: u128) -> bool {
+    v == WC_BIT
 }
 
-impl StreamValue {
-    fn new(id: usize, seq: usize, values: Vec<(String, String)>) -> Self {
-        Self {
-            id,
-            seq,
-            _values: values,
+#[inline]
+fn get_current_time() -> usize {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("?")
+        .as_millis() as usize
+}
+
+// CLEAN-UP START
+// Why 128 bits? To make space for a bit that can be read to determine if it's a wildcard or not.
+// Is this kinda dumb? Yes
+fn parse_string(id: String, seq: Option<String>) -> R<(u128, u128)> {
+    let id = match &id == WC_STR {
+        true => WC_BIT,
+        false => {
+            if let Ok(id) = id.parse::<u128>() {
+                id
+            } else {
+                return Err(StoreError::InvalidStreamID);
+            }
+        }
+    };
+
+    let seq = match seq {
+        Some(s) => match &s == "*" {
+            true => WC_BIT,
+            false => {
+                if let Ok(s) = s.parse::<u128>() {
+                    s
+                } else {
+                    return Err(StoreError::InvalidStreamID);
+                }
+            }
+        },
+        None => WC_BIT, // If we have no sequence value, assume its a wc
+    };
+
+    // If passed a value that's greater than the max possible 64 bit into and it's not a
+    // wildcard, err out
+    if ((id > std::usize::MAX as u128) && !is_wc(id))
+        || ((seq > std::usize::MAX as u128) && !is_wc(seq))
+    {
+        Err(StoreError::InvalidStreamID)
+    } else {
+        match id == 0 && seq == 0 {
+            true => Err(StoreError::StreamIDZero),
+            false => Ok((id, seq)),
         }
     }
 }
 
-fn new_stream_id(last: Option<(usize, usize)>) -> R<(usize, usize)> {
-    // The sun will literally explode before this would overflow 64 bits
-    let current_time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("?")
-        .as_millis() as usize;
-    match last {
-        Some((id, seq)) => match current_time == id {
-            true => Ok((current_time, (seq + 1))),
-            false => match current_time > id {
-                true => Ok((current_time, 0)),
-                false => Err(StoreError::InvalidStreamID),
-            },
-        },
-        None => Ok((current_time, 0)),
+// IDs are a combination of an 'id' and a 'seq(uence)'
+#[derive(Debug, Clone, Copy)]
+pub struct StreamID {
+    id: usize,
+    seq: usize,
+}
+
+impl Default for StreamID {
+    fn default() -> Self {
+        Self {
+            id: get_current_time(),
+            seq: 0,
+        }
     }
 }
 
-fn get_stream_id(last: Option<(usize, usize)>, next: Option<(usize, usize)>) -> R<(usize, usize)> {
-    if next.is_some() && next.unwrap() == (0, 0) {
-        Err(StoreError::StreamIDZero)
-    } else {
-        match (last.is_some(), next.is_some()) {
-            (true, true) => {
-                let (last_id, last_seq) = last.unwrap();
-                let (next_id, next_seq) = next.unwrap();
-                match (next_id == last_id, next_seq > last_seq) {
-                    (true, true) => Ok((next_id, next_seq)),
-                    (true, false) => Err(StoreError::InvalidStreamID),
-                    (false, _) => match next_id > last_id {
-                        true => Ok((next_id, next_seq)),
-                        false => Err(StoreError::InvalidStreamID),
-                    },
+impl StreamID {
+    fn new(id: usize, seq: usize) -> Self {
+        Self { id, seq }
+    }
+
+    fn try_valid_stream_id(id: String, seq: Option<String>, last: Option<Self>) -> R<Self> {
+        let (id, seq) = parse_string(id, seq)?;
+        if let Some(l) = last {
+            match (is_wc(id), is_wc(seq)) {
+                (true, true) => {
+                    let id = get_current_time();
+                    match id == l.id {
+                        true => {
+                            let seq = l.seq + 1;
+                            Ok(Self::new(id, seq))
+                        }
+                        false => Ok(Self::new(id, 0)),
+                    }
+                }
+                (true, false) => {
+                    let id = get_current_time();
+                    let seq = seq as usize;
+                    match id == l.id {
+                        true => {
+                            if seq > l.seq {
+                                Ok(Self::new(id, seq))
+                            } else {
+                                Err(StoreError::InvalidStreamID)
+                            }
+                        }
+                        false => Ok(Self::new(id, seq)),
+                    }
+                }
+                (false, true) => {
+                    let id = id as usize;
+                    match id == l.id {
+                        true => Ok(Self::new(id, l.seq + 1)),
+                        false => match id > l.id {
+                            true => Ok(Self::new(id, 0)),
+                            false => Err(StoreError::InvalidStreamID),
+                        },
+                    }
+                }
+                (false, false) => {
+                    let id = id as usize;
+                    let seq = seq as usize;
+                    match id == l.id {
+                        true => match seq > l.seq {
+                            true => Ok(Self::new(id, seq)),
+                            false => Err(StoreError::InvalidStreamID),
+                        },
+                        false => match id > l.id {
+                            true => Ok(Self::new(id, seq)),
+                            false => Err(StoreError::InvalidStreamID),
+                        },
+                    }
                 }
             }
-            (false, true) => Ok(next.unwrap()),
-            _ => new_stream_id(last),
+        } else {
+            let id = match is_wc(id) {
+                true => get_current_time(),
+                false => id as usize,
+            };
+            let seq = match is_wc(seq) {
+                true => match id == 0 {
+                    true => 1, // no 0-0
+                    false => 0,
+                },
+                false => seq as usize,
+            };
+            Ok(Self::new(id, seq))
+        }
+    }
+
+    fn checked_new(id: String, seq: Option<String>, stream: Option<&Vec<StreamValue>>) -> R<Self> {
+        match stream {
+            Some(s) => {
+                let last = s.iter().last();
+                match last {
+                    Some(l) => Self::try_valid_stream_id(id, seq, Some(l.uid)),
+                    None => Self::try_valid_stream_id(id, seq, None),
+                }
+            }
+            None => Self::try_valid_stream_id(id, seq, None),
+        }
+    }
+}
+// CLEAN-UP END
+
+// I'm not convinced this should go here
+#[derive(Debug, Clone)]
+pub struct StreamValue {
+    uid: StreamID,
+    _values: Vec<(String, String)>,
+}
+
+impl StreamValue {
+    fn new(uid: StreamID, values: Vec<(String, String)>) -> Self {
+        Self {
+            uid,
+            _values: values,
         }
     }
 }
@@ -162,24 +284,30 @@ impl StreamStore {
         &mut self,
         key: String,
         values: Vec<(String, String)>,
-        stream_id: Option<(usize, usize)>,
+        stream_id: Option<(String, Option<String>)>,
     ) -> R<(usize, usize)> {
         let get = self.inner.get(&key).cloned();
-        let (id, seq): (usize, usize);
-        if let Some(mut get) = get {
-            let last = get.iter().last().unwrap();
-            (id, seq) = get_stream_id(Some((last.id, last.seq)), stream_id)?;
-            let stream_value = StreamValue::new(id, seq, values);
+        let added_id = if let Some(mut get) = get {
+            let uid = match stream_id {
+                Some(id) => StreamID::checked_new(id.0, id.1, Some(&get))?,
+                None => StreamID::default(),
+            };
+            let stream_value = StreamValue::new(uid, values);
             get.push_back(stream_value);
             self.inner.remove(&key);
             self.inner.insert(key, get);
+            (uid.id, uid.seq)
         } else {
-            (id, seq) = get_stream_id(None, stream_id)?;
-            let stream_value = StreamValue::new(id, seq, values);
+            let uid = match stream_id {
+                Some(id) => StreamID::checked_new(id.0, id.1, None)?,
+                None => StreamID::default(),
+            };
+            let stream_value = StreamValue::new(uid, values);
             let stream = Vec::from([stream_value]);
             self.inner.insert(key, stream);
+            (uid.id, uid.seq)
         };
-        Ok((id, seq))
+        Ok(added_id)
     }
 }
 

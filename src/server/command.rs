@@ -176,7 +176,7 @@ pub enum Command {
     Tipe(String),
     XAdd {
         key: String,
-        id: Option<(usize, usize)>,
+        id: Option<(String, Option<String>)>,
         values: Vec<(String, String)>,
     },
 }
@@ -309,24 +309,23 @@ impl Command {
     fn xadd(mut args: Vec<String>) -> R<Self> {
         let key = args.pop_front().unwrap();
         // stream key regex
-        let re = Regex::new(r"[0-9]+-[0-9]+").unwrap();
-        let stream_id: Option<(usize, usize)>;
+        // Match examples -> *, *-*, *-123, 123-*, 123-123,
+        // This will also match 1x3-12x -> That gets handled by the store.
+        let re = Regex::new(r"([0-9]+|\*)-([0-9]+|\*)|\*").unwrap();
+        let stream_id: Option<(String, Option<String>)>;
         let k: String;
         let next = args.pop_front().unwrap();
         if re.is_match(&next) {
             // Fix me
-            let mut split = next.split('-');
-            let id = split
-                .next()
-                .unwrap()
-                .parse::<usize>()
-                .expect("Could not parse ID!");
-            let seq = split
-                .next()
-                .unwrap()
-                .parse::<usize>()
-                .expect("Could not parse sequence!");
-            stream_id = Some((id, seq));
+            stream_id = match next.contains('-') {
+                true => {
+                    let mut split = next.split('-');
+                    let id = split.next().unwrap().to_string();
+                    let seq = split.next().unwrap().to_string();
+                    Some((id, Some(seq)))
+                }
+                false => Some((next, None)),
+            };
             k = args.pop_front().unwrap();
         } else {
             stream_id = None;
@@ -500,7 +499,7 @@ impl Command {
     async fn do_xadd(
         key: String,
         values: Vec<(String, String)>,
-        stream_id: Option<(usize, usize)>,
+        stream_id: Option<(String, Option<String>)>,
         server: &Arc<RwLock<Server>>,
         stream: &mut TcpStream,
     ) -> R<CommandResult> {
