@@ -1,11 +1,10 @@
-// use std::net::SocketAddrV4;
-use std::sync::Arc;
-
-use tokio::net::TcpStream;
-
 pub mod command;
 pub mod errors;
 pub mod info;
+
+use std::sync::Arc;
+
+use tokio::net::TcpStream;
 
 #[derive(Debug)]
 pub struct Replica {

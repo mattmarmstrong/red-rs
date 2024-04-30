@@ -1,3 +1,6 @@
+pub mod errors;
+pub mod file;
+
 use std::time::{Duration, Instant};
 
 use hashbrown::HashMap;
@@ -5,9 +8,6 @@ use hashbrown::HashMap;
 use crate::stream::store::StreamStore;
 
 use self::errors::StoreError;
-
-pub mod errors;
-pub mod file;
 
 type R<T> = anyhow::Result<T, StoreError>;
 

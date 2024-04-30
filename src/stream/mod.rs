@@ -1,13 +1,13 @@
+pub mod errors;
+pub mod parse;
+pub mod serialize;
+pub mod store;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use self::errors::StreamError;
 use self::parse::StreamIDParser;
 use self::store::Stream;
-
-pub mod errors;
-pub mod parse;
-pub mod serialize;
-pub mod store;
 
 const WC_STR: &str = "*";
 // Range wildcards

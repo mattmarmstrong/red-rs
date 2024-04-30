@@ -25,7 +25,7 @@ impl StreamIDParser {
         // This will also match 1x3-12x -> That gets handled by the store.
         let re = Regex::new(r"([0-9]+|\*)-([0-9]+|\*)|\*|\+|\-").unwrap();
         if re.is_match(&id) {
-            match id.contains('-') {
+            match id.contains('-') && id != RANGE_LT {
                 true => {
                     let mut split = id.split('-');
                     let id = split.next().unwrap().to_string();
@@ -57,6 +57,7 @@ impl StreamIDParser {
     pub fn to_stream_id(id: String, seq: Option<String>) -> R<StreamID> {
         match Self::convert_to_usize_opt(id, seq)? {
             (Some(id), Some(seq)) => Ok(StreamID::new(id, seq)),
+            (Some(id), None) => Ok(StreamID::new(id, id)), // either 0-0 or MAX-MAX
             _ => panic!("Called in the wrong context!"),
         }
     }
