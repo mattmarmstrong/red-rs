@@ -1,3 +1,5 @@
+use crate::stream::errors::StreamError;
+
 #[derive(Debug)]
 pub enum CommandError {
     NotFound,
@@ -26,3 +28,9 @@ impl std::fmt::Display for CommandError {
 }
 
 impl std::error::Error for CommandError {}
+
+impl From<StreamError> for CommandError {
+    fn from(_value: StreamError) -> Self {
+        Self::InvalidArgs
+    }
+}

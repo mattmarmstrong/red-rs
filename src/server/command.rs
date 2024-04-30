@@ -8,7 +8,6 @@ use std::time::Duration;
 
 use hashbrown::{HashMap, HashSet};
 use lazy_static::lazy_static;
-use regex::Regex;
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -16,9 +15,11 @@ use tokio::sync::RwLock;
 
 use crate::resp::data::DataType;
 use crate::resp::serialize::Serializer;
+use crate::stream::errors::StreamError;
+use crate::stream::parse::StreamIDParser;
+use crate::stream::serialize::StreamSerializer;
 
 use super::errors::CommandError;
-use super::store::errors::StoreError;
 use super::store::file::empty_store_file_bytes;
 use super::Server;
 
@@ -131,21 +132,27 @@ lazy_static! {
         let xadd_entry = CommandEntry::new(2, None);
         commands.insert("xadd".to_string(), xadd_entry);
 
+        // Command - xrange
+        let mut xrange_options = HashSet::new();
+        let count_entry = OptionEntry::new("COUNT".to_string(), Some(1));
+        xrange_options.insert(count_entry);
+        let xrange_entry = CommandEntry::new(3, Some(xrange_options));
+        commands.insert("xrange".to_string(), xrange_entry);
+
         commands
     };
 }
 
-type Vec<T> = VecDeque<T>;
 type R<T> = anyhow::Result<T, CommandError>;
 
 #[derive(Debug)]
 pub struct CommandOption {
     name: String,
-    val: Option<Vec<String>>,
+    val: Option<VecDeque<String>>,
 }
 
 impl CommandOption {
-    fn new(name: String, val: Option<Vec<String>>) -> Self {
+    fn new(name: String, val: Option<VecDeque<String>>) -> Self {
         Self { name, val }
     }
 }
@@ -176,14 +183,19 @@ pub enum Command {
     Tipe(String),
     XAdd {
         key: String,
-        id: Option<(String, Option<String>)>,
+        id: (String, Option<String>),
         values: Vec<(String, String)>,
+    },
+    XRange {
+        key: String,
+        start: (String, Option<String>),
+        end: (String, Option<String>),
     },
 }
 
 impl Command {
-    fn parse_options(name: &str, mut args: Vec<String>) -> R<Vec<CommandOption>> {
-        let mut buffer = Vec::new();
+    fn parse_options(name: &str, mut args: VecDeque<String>) -> R<VecDeque<CommandOption>> {
+        let mut buffer = VecDeque::new();
         // it's on the caller to ensure that this won't panic
         let entry = COMMANDS.get(name).unwrap();
         while let Some(arg) = args.pop_front() {
@@ -193,7 +205,7 @@ impl Command {
                         if n > args.len() {
                             return Err(CommandError::InvalidArgs);
                         };
-                        let mut vals = Vec::with_capacity(n);
+                        let mut vals = VecDeque::with_capacity(n);
                         for _ in 0..n {
                             vals.push_back(args.pop_front().unwrap())
                         }
@@ -214,7 +226,7 @@ impl Command {
         Ok(Self::PING)
     }
 
-    fn echo(mut args: Vec<String>) -> R<Self> {
+    fn echo(mut args: VecDeque<String>) -> R<Self> {
         // errors should be handled well before this point
         // leaving this here for now, will remove later
         match args.pop_front() {
@@ -223,14 +235,14 @@ impl Command {
         }
     }
 
-    fn get(mut args: Vec<String>) -> R<Self> {
+    fn get(mut args: VecDeque<String>) -> R<Self> {
         match args.pop_front() {
             Some(arg) => Ok(Self::Get(arg)),
             None => Err(CommandError::InvalidArgs),
         }
     }
 
-    fn set(mut args: Vec<String>) -> R<Self> {
+    fn set(mut args: VecDeque<String>) -> R<Self> {
         let k = args.pop_front();
         let v = args.pop_front();
         match (k, v) {
@@ -257,15 +269,14 @@ impl Command {
         }
     }
 
-    fn tipe(mut args: Vec<String>) -> R<Self> {
-        print!("Called type cmd constructor");
+    fn tipe(mut args: VecDeque<String>) -> R<Self> {
         match args.pop_front() {
             Some(k) => Ok(Self::Tipe(k)),
             None => Err(CommandError::InvalidArgs),
         }
     }
 
-    fn info(args: Vec<String>) -> R<Self> {
+    fn info(args: VecDeque<String>) -> R<Self> {
         // TODO: refactor
         let mut options = Command::parse_options("info", args)?;
         debug_assert!(options.len() == 1);
@@ -273,7 +284,7 @@ impl Command {
         Ok(Self::Info(option.name))
     }
 
-    fn repl_conf(args: Vec<String>) -> R<Self> {
+    fn repl_conf(args: VecDeque<String>) -> R<Self> {
         let mut options = Command::parse_options("replconf", args)?;
         let mut port: Option<u16> = None;
         let mut capa: Option<String> = None;
@@ -291,7 +302,7 @@ impl Command {
         Ok(Self::ReplConf { port, capa })
     }
 
-    fn psync(mut args: Vec<String>) -> R<Self> {
+    fn psync(mut args: VecDeque<String>) -> R<Self> {
         let repl_id = args.pop_front();
         let offset = args.pop_front();
         match (repl_id, offset) {
@@ -306,43 +317,23 @@ impl Command {
         }
     }
 
-    fn xadd(mut args: Vec<String>) -> R<Self> {
+    fn xadd(mut args: VecDeque<String>) -> R<Self> {
         let key = args.pop_front().unwrap();
-        // stream key regex
-        // Match examples -> *, *-*, *-123, 123-*, 123-123,
-        // This will also match 1x3-12x -> That gets handled by the store.
-        let re = Regex::new(r"([0-9]+|\*)-([0-9]+|\*)|\*").unwrap();
-        let stream_id: Option<(String, Option<String>)>;
-        let k: String;
         let next = args.pop_front().unwrap();
-        if re.is_match(&next) {
-            // Fix me
-            stream_id = match next.contains('-') {
-                true => {
-                    let mut split = next.split('-');
-                    let id = split.next().unwrap().to_string();
-                    let seq = split.next().unwrap().to_string();
-                    Some((id, Some(seq)))
-                }
-                false => Some((next, None)),
-            };
-            k = args.pop_front().unwrap();
-        } else {
-            stream_id = None;
-            k = next
-        }
+        let stream_id = StreamIDParser::split_initial(next)?;
         let mut buffer = Vec::with_capacity(8);
+        // stream values
+        let k = args.pop_front().unwrap();
         let v = args.pop_front().unwrap();
-        buffer.push_back((k, v));
+        buffer.push((k, v));
         let remaining_args = args.len();
-        // The way this is written is extremely confusing, but since the first stream key has technically been popped
-        // already, this should be an odd number.
+        // stream values need to be in a 'key: value' format
         match remaining_args % 2 == 0 {
             true => {
                 for _ in (0..remaining_args).step_by(2) {
                     let k = args.pop_front().unwrap();
                     let v = args.pop_front().unwrap();
-                    buffer.push_back((k, v))
+                    buffer.push((k, v))
                 }
                 Ok(Self::XAdd {
                     key,
@@ -352,6 +343,13 @@ impl Command {
             }
             false => Err(CommandError::InvalidArgs),
         }
+    }
+
+    fn xrange(mut args: VecDeque<String>) -> R<Self> {
+        let key = args.pop_front().unwrap();
+        let start = StreamIDParser::split_initial(args.pop_front().unwrap())?;
+        let end = StreamIDParser::split_initial(args.pop_front().unwrap())?;
+        Ok(Self::XRange { key, start, end })
     }
 
     #[inline]
@@ -378,8 +376,8 @@ impl Command {
         stream: &mut TcpStream,
     ) -> R<CommandResult> {
         let s = server.read().await;
-        let resp = match s.store.kv_store.try_read(key.to_owned()) {
-            Some(v) => Serializer::to_bulk_str(&v),
+        let resp = match s.store.kv_store.try_read(key) {
+            Some(v) => Serializer::to_bulk_str(v),
             None => "$-1\r\n".to_string(),
         };
         stream
@@ -397,7 +395,7 @@ impl Command {
         stream: &mut TcpStream,
     ) -> R<CommandResult> {
         let mut s = server.write().await;
-        let resp = match s.store.kv_store.try_write(key.clone(), val.clone(), exp) {
+        let resp = match s.store.kv_store.try_write(key, val, exp) {
             Ok(_) => "+OK\r\n",
             // TODO: error handling
             Err(_) => "$-1\r\n",
@@ -406,21 +404,6 @@ impl Command {
             .write_all(resp.as_bytes())
             .await
             .expect("Response write failed!");
-        if s.replicas.is_some() {
-            // re-constructing the byte slice we recieved then deconstructed. big brain move
-            // refactor me!
-            let mut cmd_vec = std::vec::Vec::with_capacity(5);
-            cmd_vec.push("set");
-            cmd_vec.push(&key);
-            cmd_vec.push(&val);
-            // skipping the px command for now, this will bite later I'm sure.
-            let cmd = Serializer::to_arr(cmd_vec);
-            if s.repl_queue.is_some() {
-                s.repl_queue.as_mut().unwrap().push(cmd);
-            } else {
-                s.repl_queue = Some(vec![cmd]);
-            }
-        }
         Ok(CommandResult::Ok)
     }
 
@@ -499,7 +482,7 @@ impl Command {
     async fn do_xadd(
         key: String,
         values: Vec<(String, String)>,
-        stream_id: Option<(String, Option<String>)>,
+        stream_id: (String, Option<String>),
         server: &Arc<RwLock<Server>>,
         stream: &mut TcpStream,
     ) -> R<CommandResult> {
@@ -509,13 +492,12 @@ impl Command {
                 &[id.to_string().as_str(), "-", seq.to_string().as_str()].concat(),
             ),
             Err(e) => match e {
-                StoreError::StreamIDZero => {
+                StreamError::StreamIDZero => {
                     Serializer::to_simple_err("The ID specified in XADD must be greater than 0-0")
                 }
-                StoreError::InvalidStreamID => Serializer::to_simple_err(
+                StreamError::InvalidStreamID => Serializer::to_simple_err(
                     "The ID specified in XADD is equal or smaller than the target stream top item",
                 ),
-                _ => Serializer::to_simple_err("Unknown error occurred"),
             },
         };
         stream
@@ -525,7 +507,33 @@ impl Command {
         Ok(CommandResult::Ok)
     }
 
-    fn try_new(str: &str, args: Option<Vec<String>>) -> R<Self> {
+    async fn do_xrange(
+        key: String,
+        start: (String, Option<String>),
+        end: (String, Option<String>),
+        server: &Arc<RwLock<Server>>,
+        stream: &mut TcpStream,
+    ) -> R<CommandResult> {
+        let s = server.read().await;
+        let resp = match s.store.stream_store.try_read(key) {
+            Some(v) => {
+                let (start_id, start_seq) = start;
+                let (end_id, end_seq) = end;
+                let start = StreamIDParser::to_stream_id(start_id, start_seq)?;
+                let end = StreamIDParser::to_stream_id(end_id, end_seq)?;
+                let range = v.range(start..=end).collect();
+                StreamSerializer::to_arr(&range)
+            }
+            None => "$-1\r\n".to_string(),
+        };
+        stream
+            .write_all(resp.as_bytes())
+            .await
+            .expect("Response write failed!");
+        Ok(CommandResult::Ok)
+    }
+
+    fn try_new(str: &str, args: Option<VecDeque<String>>) -> R<Self> {
         match str {
             // No args commands
             "ping" => Command::ping(),
@@ -541,6 +549,7 @@ impl Command {
                     "psync" => Command::psync(args),
                     "type" => Command::tipe(args),
                     "xadd" => Command::xadd(args),
+                    "xrange" => Command::xrange(args),
                     _ => Err(CommandError::NotFound),
                 }
             }
@@ -557,12 +566,12 @@ impl Command {
         }
     }
 
-    fn from_arr(arr: Vec<DataType>) -> R<Self> {
+    fn from_arr(arr: VecDeque<DataType>) -> R<Self> {
         // Currently assumes that the array args are all string types.
         let mut str_arr = arr
             .iter()
             .map(|data| data.try_to_string().unwrap())
-            .collect::<Vec<String>>();
+            .collect::<VecDeque<String>>();
         let first = str_arr.pop_front().unwrap();
         // COMMANDS currently stores only the number of required args.
         // This should change.
@@ -602,6 +611,9 @@ impl Command {
             Self::Tipe(key) => Command::do_tipe(key, server, stream).await,
             Self::XAdd { key, id, values } => {
                 Command::do_xadd(key, values, id, server, stream).await
+            }
+            Self::XRange { key, start, end } => {
+                Command::do_xrange(key, start, end, server, stream).await
             }
         }
     }
