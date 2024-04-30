@@ -32,10 +32,13 @@ impl StreamStore {
         stream_id: (String, Option<String>),
     ) -> R<(usize, usize)> {
         let (id, seq) = stream_id;
-        let added_id = if let Some(mut get) = self.inner.remove(&key) {
+        let added_id = if let Some(get) = self.inner.get(&key) {
+            // .get() - to borrow the stream + check the id
             let uid = StreamID::checked_new(id, seq, Some(&get))?;
-            get.insert(uid, values);
-            self.inner.insert(key, get);
+            // .remove() to take ownership so it can be modified without cloning
+            let mut stream = self.inner.remove(&key).unwrap();
+            stream.insert(uid, values);
+            self.inner.insert(key, stream);
             (uid.id, uid.seq)
         } else {
             let uid = StreamID::checked_new(id, seq, None)?;
